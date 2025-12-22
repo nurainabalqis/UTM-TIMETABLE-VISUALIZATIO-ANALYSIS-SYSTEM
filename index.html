@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTM-TVAS | Timetable Visualization</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Google Charts -->
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+    
+    <style>
+        :root {
+            --utm-green: #2E7D32;
+            --utm-light-green: #4CAF50;
+            --utm-dark-green: #1B5E20;
+            --accent-blue: #1976D2;
+            --warning-red: #D32F2F;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            padding-top: 56px;
+        }
+        
+        .navbar-brand {
+            color: white !important;
+            font-weight: bold;
+        }
+        
+        .nav-link.active {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        .stat-card {
+            border-left: 4px solid var(--utm-green);
+            transition: transform 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .course-block {
+            background-color: var(--utm-light-green);
+            color: white;
+            padding: 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        
+        .clash-block {
+            background-color: var(--warning-red) !important;
+            border: 2px dashed white;
+        }
+        
+        .room-available {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        
+        .room-occupied {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .session-badge {
+            background-color: var(--utm-dark-green);
+            color: white;
+        }
+        
+        /* Timetable grid */
+        .timetable-grid {
+            display: grid;
+            grid-template-columns: 100px repeat(5, 1fr);
+            gap: 1px;
+            background-color: #dee2e6;
+            margin: 20px 0;
+        }
+        
+        .timetable-header {
+            background-color: var(--utm-green);
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .timetable-cell {
+            background-color: white;
+            padding: 5px;
+            min-height: 60px;
+        }
+        
+        .time-slot {
+            background-color: #e9ecef;
+            padding: 10px;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .data-source-badge {
+            font-size: 0.7rem;
+        }
+        
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            vertical-align: text-bottom;
+            border: 0.2em solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spinner-border .75s linear infinite;
+        }
+        
+        @keyframes spinner-border {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation Bar (Fixed) -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#" onclick="UTM_TVAS.loadView('dashboard')">
+                <i class="fas fa-calendar-alt"></i> UTM-TVAS
+            </a>
+            
+            <!-- Mobile Toggle Button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <!-- Navigation Links -->
+            <div class="collapse navbar-collapse" id="mainNavbar">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="UTM_TVAS.loadView('dashboard')">
+                            <i class="fas fa-tachometer-alt"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="UTM_TVAS.loadView('mycourses')">
+                            <i class="fas fa-graduation-cap"></i> My Courses
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="UTM_TVAS.loadView('timetable')">
+                            <i class="fas fa-calendar-alt"></i> Course List
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="UTM_TVAS.loadView('session')">
+                            <i class="fas fa-database"></i> Sessions
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-chart-line"></i> Analysis
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="UTM_TVAS.loadView('clash')">
+                                <i class="fas fa-exclamation-triangle"></i> Clash Detection
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="UTM_TVAS.loadView('utilization')">
+                                <i class="fas fa-door-open"></i> Room Utilization
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <!-- User Info & Logout -->
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <span class="navbar-text me-3" id="userInfo">
+                            <i class="fas fa-user"></i> Loading...
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-danger" href="#" onclick="logout()">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Content Area -->
+    <div class="container-fluid mt-4" id="content">
+        <!-- Content will be loaded here dynamically -->
+        <div class="text-center py-5">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading UTM-TVAS...</p>
+        </div>
+    </div>
+    
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <!-- Application Scripts -->
+    <script src="utils.js"></script>
+    <script src="models/ttmsModel.js"></script>
+    <script src="controllers/authController.js"></script>
+    <script src="controllers/courseController.js"></script>
+    <script src="controllers/sessionController.js"></script>
+    <script src="controllers/dashboardController.js"></script>
+    <script src="controllers/analysisController.js"></script>
+    <script src="controllers/studentCourseController.js"></script>
+    <script src="controllers/clashController.js"></script>
+    
+<script>
+    // Utility Functions
+    function formatDate(dateStr) {
+        if (!dateStr) return 'N/A';
+        try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return dateStr;
+            return date.toLocaleDateString('en-MY', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        } catch (error) {
+            return dateStr;
+        }
+    }
+    
+    function showAlert(message, type = 'info') {
+        // Remove any existing alerts
+        $('.alert-dismissible').remove();
+        
+        // Create new alert
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show position-fixed top-0 end-0 m-3" style="z-index: 9999;">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        $('body').append(alertHtml);
+        
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            $('.alert-dismissible').alert('close');
+        }, 5000);
+    }
+    
+    // Main Application Controller
+    const UTM_TVAS = {
+        currentView: 'dashboard',
+        userData: null,
+        isLoading: false,
+        
+        // Initialize application
+        async init() {
+            console.log("UTM_TVAS.init() called");
+            
+            // Check authentication
+            if (!isAuthenticated()) {
+                window.location.href = "views/start.html";
+                return;
+            }
+            
+            // Load user data
+            this.userData = getCurrentUser();
+            
+            // Update UI
+            this.updateUserUI();
+            
+            // Load Google Charts
+            google.charts.load('current', {'packages':['corechart', 'bar']});
+            
+            // Set up view change handlers
+            this.setupViewHandlers();
+            
+            // Load initial view
+            await this.loadView('dashboard');
+            
+            // Preload common data
+            this.preloadData();
+        },
+        
+        // Update user info in navbar
+        updateUserUI() {
+            if (this.userData) {
+                $('#userInfo').html(`
+                    <i class="fas fa-user me-1"></i> ${this.userData.name} 
+                    <span class="badge bg-success ms-1">${this.userData.role}</span>
+                `);
+            }
+        },
+        
+        // Setup navigation handlers
+        setupViewHandlers() {
+            $('.nav-link').on('click', function(e) {
+                e.preventDefault();
+                const viewName = $(this).data('view') || $(this).attr('onclick')?.match(/'(\w+)'/)?.[1];
+                if (viewName) {
+                    UTM_TVAS.loadView(viewName);
+                }
+            });
+        },
+        
+        // Load view dynamically
+        async loadView(viewName) {
+            if (this.isLoading) return;
+            
+            this.currentView = viewName;
+            this.isLoading = true;
+            
+            console.log(`Loading view: ${viewName}`);
+            
+            // Update active nav link
+            $('.nav-link').removeClass('active');
+            $(`.nav-link[onclick*="${viewName}"], [data-view="${viewName}"]`).addClass('active');
+            
+            // Show loading spinner
+            const content = $('#content');
+            content.html(`
+                <div class="text-center py-5">
+                    <div class="spinner-border text-success" style="width: 3rem; height: 3rem;" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-3 text-muted">Loading ${viewName} from TTMS...</p>
+                </div>
+            `);
+            
+            try {
+                let html = '';
+                
+                switch(viewName) {
+                    case 'dashboard':
+                        html = await this.loadDashboard();
+                        break;
+                    case 'timetable':
+                        html = await this.loadTimetable();
+                        break;
+                    case 'session':
+                        html = await this.loadSession();
+                        break;
+                    case 'mycourses':
+                        html = await this.loadMyCourses();
+                        break;
+                    case 'clash':
+                        html = await this.loadClashDetection();
+                        break;
+                    case 'utilization':
+                        html = await this.loadRoomUtilization();
+                        break;
+                    case 'home':
+                    default:
+                        html = await this.loadHome();
+                }
+                
+                content.html(html);
+                
+                // Initialize view-specific functionality
+                await this.initView(viewName);
+                
+            } catch (error) {
+                console.error(`Error loading view ${viewName}:`, error);
+                content.html(`
+                    <div class="alert alert-danger m-4">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>Error loading content</strong><br>
+                        <small>${error.message || 'Please try again'}</small>
+                    </div>
+                `);
+            } finally {
+                this.isLoading = false;
+            }
+        },
+        
+        // Initialize view-specific functionality
+        async initView(viewName) {
+            console.log(`Initializing view: ${viewName}`);
+            
+            switch(viewName) {
+                case 'dashboard':
+                    if (typeof analysisController !== 'undefined') {
+                        setTimeout(() => {
+                            analysisController.initDashboardCharts();
+                        }, 300);
+                    }
+                    break;
+                case 'mycourses':
+                    if (typeof loadMyCourses === 'function') {
+                        setTimeout(() => loadMyCourses(), 100);
+                    }
+                    break;
+                case 'timetable':
+                    if (typeof loadCourses === 'function') {
+                        setTimeout(() => loadCourses(), 100);
+                    }
+                    break;
+                case 'session':
+                    if (typeof loadSessions === 'function') {
+                        setTimeout(() => loadSessions(), 100);
+                    }
+                    break;
+                case 'clash':
+                    if (typeof loadClashDetection === 'function') {
+                        setTimeout(() => {
+                            loadClashDetection();
+                        }, 300);
+                    }
+                    break;
+                case 'utilization':
+                    // Add this case for room utilization
+                    setTimeout(() => {
+                        if (typeof loadRoomUtilizationFast === 'function') {
+                            loadRoomUtilizationFast();
+                        } else {
+                            console.error("loadRoomUtilizationFast function not found");
+                            // Fallback to basic loading
+                            $('#roomUtilizationContainer').html(`
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    Error loading room utilization. Please refresh the page.
+                                </div>
+                            `);
+                        }
+                    }, 100);
+                    break;
+            }
+            
+            // Initialize tooltips
+            $('[data-bs-toggle="tooltip"]').tooltip();
+        },
+
+        // Load My Courses Summary
+        async loadMyCoursesSummary() {
+            const user = getCurrentUser();
+            if (!user) return;
+            
+            TTMS.fetchMyCourses().then(courses => {
+                if (courses && courses.length > 0) {
+                    const currentSession = TTMS.getCurrentSession();
+                    const currentCourses = courses.filter(course => 
+                        course.sesi === currentSession.sesi && 
+                        course.semester.toString() === currentSession.semester
+                    );
+                    
+                    if (currentCourses.length > 0) {
+                        let html = `
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <p class="mb-2">You are registered for <strong>${currentCourses.length} courses</strong> this session:</p>
+                                    <div class="d-flex flex-wrap gap-2">
+                        `;
+                        
+                        currentCourses.slice(0, 5).forEach(course => {
+                            html += `<span class="badge bg-success">${course.kod_subjek}</span>`;
+                        });
+                        
+                        if (currentCourses.length > 5) {
+                            html += `<span class="badge bg-secondary">+${currentCourses.length - 5} more</span>`;
+                        }
+                        
+                        html += `
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <button class="btn btn-sm btn-outline-success" onclick="UTM_TVAS.loadView('mycourses')">
+                                        <i class="fas fa-external-link-alt me-1"></i> View All My Courses
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        
+                        $('#myCoursesSummary').html(html);
+                    } else {
+                        $('#myCoursesSummary').html(`
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-circle"></i>
+                                You are not registered for any courses in the current session.
+                                <button class="btn btn-sm btn-outline-success ms-2" onclick="UTM_TVAS.loadView('mycourses')">
+                                    Check All Sessions
+                                </button>
+                            </div>
+                        `);
+                    }
+                } else {
+                    $('#myCoursesSummary').html(`
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            No registered courses found for ${user.username}
+                        </div>
+                    `);
+                }
+            }).catch(error => {
+                $('#myCoursesSummary').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Failed to load registered courses
+                    </div>
+                `);
+            });
+        },
+        
+        // Preload common data
+        preloadData() {
+            // Preload sessions for dropdowns
+            TTMS.fetchSessions().then(sessions => {
+                if (sessions && sessions.length > 0) {
+                    localStorage.setItem('cachedSessions', JSON.stringify(sessions));
+                }
+            }).catch(console.error);
+        },
+        
+        // ============ VIEW TEMPLATES ============
+        
+        async loadDashboard() {
+            const user = getCurrentUser();
+            const currentSession = TTMS.getCurrentSession();
+            
+            return `
+                <div class="container-fluid">
+                    <!-- Dashboard Header -->
+                    <div class="row mb-4">
+                        <div class="col-md-8">
+                            <h2 class="text-success">
+                                <i class="fas fa-tachometer-alt"></i> Dashboard
+                            </h2>
+                            <p class="text-muted mb-0">
+                                Real-time data from TTMS | Session: ${currentSession.sesi}-${currentSession.semester}
+                            </p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <button class="btn btn-success" onclick="analysisController.refreshAllCharts()">
+                                <i class="fas fa-sync-alt"></i> Refresh TTMS Data
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Real-time Statistics -->
+                    <div class="row mb-4">
+                        <div class="col-xl-3 col-md-6 mb-4">
+                            <div class="card border-start border-primary border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">My Courses</h6>
+                                            <h2 class="fw-bold text-primary mb-0" id="myCourseCount">0</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-book fa-2x text-primary"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Current session</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-xl-3 col-md-6 mb-4">
+                            <div class="card border-start border-success border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Total Courses</h6>
+                                            <h2 class="fw-bold text-success mb-0" id="courseCount">0</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-graduation-cap fa-2x text-success"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">In TTMS</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-xl-3 col-md-6 mb-4">
+                            <div class="card border-start border-warning border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Sessions</h6>
+                                            <h2 class="fw-bold text-warning mb-0" id="sessionCount">0</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-calendar-alt fa-2x text-warning"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Academic sessions</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-xl-3 col-md-6 mb-4">
+                            <div class="card border-start border-info border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Room Usage</h6>
+                                            <h2 class="fw-bold text-info mb-0" id="roomUtilization">0%</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-door-open fa-2x text-info"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Average utilization</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Charts Grid -->
+                    <div class="row">
+                        <!-- Workload Chart -->
+                        <div class="col-xl-6 mb-4">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-chalkboard-teacher text-success"></i>
+                                        Lecturer Workload
+                                    </h5>
+                                    <span class="badge bg-success data-source-badge">TTMS Live</span>
+                                </div>
+                                <div id="workloadChart" style="height: 300px;"></div>
+                                <div class="text-end mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-database"></i> Data from TTMS lecturers
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Room Utilization -->
+                        <div class="col-xl-6 mb-4">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-door-open text-primary"></i>
+                                        Room Utilization
+                                    </h5>
+                                    <span class="badge bg-primary data-source-badge">TTMS Live</span>
+                                </div>
+                                <div id="roomChart" style="height: 300px;"></div>
+                                <div class="text-end mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-database"></i> Real room bookings
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Weekly Usage -->
+                        <div class="col-xl-6 mb-4">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-calendar-week text-warning"></i>
+                                        Weekly Distribution
+                                    </h5>
+                                    <span class="badge bg-warning data-source-badge">TTMS Live</span>
+                                </div>
+                                <div id="weeklyUsageChart" style="height: 300px;"></div>
+                                <div class="text-end mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-database"></i> Course schedules analysis
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Peak Hours -->
+                        <div class="col-xl-6 mb-4">
+                            <div class="chart-container">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-chart-line text-danger"></i>
+                                        Peak Hours
+                                    </h5>
+                                    <span class="badge bg-danger data-source-badge">TTMS Live</span>
+                                </div>
+                                <div id="peakHoursChart" style="height: 300px;"></div>
+                                <div class="text-end mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-database"></i> Analysis of all courses
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Data Source Info -->
+                    <div class="card mt-4">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0"><i class="fas fa-info-circle"></i> Data Source Information</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>TTMS Connection Status</h6>
+                                    <div class="alert alert-success">
+                                        <i class="fas fa-check-circle"></i>
+                                        Connected to UTM TTMS API
+                                        <br>
+                                        <small>Endpoint: ${TTMS.BASE_URL}</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Data Freshness</h6>
+                                    <ul class="list-group">
+                                        <li class="list-group-item d-flex justify-content-between">
+                                            <span>Last Updated</span>
+                                            <span class="badge bg-success">Live</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between">
+                                            <span>Data Source</span>
+                                            <span class="badge bg-info">TTMS Official</span>
+                                        </li>
+                                        <li class="list-group-item d-flex justify-content-between">
+                                            <span>Session</span>
+                                            <span class="badge bg-primary">${currentSession.sesi}-${currentSession.semester}</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        },
+        
+        async loadMyCourses() {
+            const user = getCurrentUser();
+            const currentSession = TTMS.getCurrentSession();
+            
+            return `
+                <div class="container-fluid">
+                    <!-- Page Header -->
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <div>
+                            <h2 class="text-success">
+                                <i class="fas fa-graduation-cap"></i> My Registered Courses
+                            </h2>
+                            <p class="text-muted mb-0">
+                                Student: <strong>${user.name}</strong> | 
+                                Matric: <strong>${user.username}</strong> | 
+                                Role: <span class="badge bg-success">${user.role}</span>
+                            </p>
+                        </div>
+                        <div class="text-end">
+                            <div class="badge bg-success fs-6">
+                                <i class="fas fa-calendar me-1"></i> ${currentSession.sesi}-${currentSession.semester}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Summary Cards -->
+                    <div class="row mb-4">
+                        <div class="col-md-3 mb-3">
+                            <div class="card border-start border-success border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Total Courses</h6>
+                                            <h2 class="fw-bold text-success mb-0" id="totalMyCourses">0</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-book fa-2x text-success"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">All sessions</small>
+                                </div>
+                            </div>
+                        </div>
+                   
+                        
+                        <div class="col-md-3 mb-3">
+                            <div class="card border-start border-primary border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Current Session</h6>
+                                            <h2 class="fw-bold text-primary mb-0" id="currentSessionCourses">0</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-calendar-alt fa-2x text-primary"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">${currentSession.sesi}-${currentSession.semester}</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-3 mb-3">
+                            <div class="card border-start border-warning border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-muted">Credits</h6>
+                                            <h2 class="fw-bold text-warning mb-0">18</h2>
+                                        </div>
+                                        <div class="align-self-center">
+                                            <i class="fas fa-credit-card fa-2x text-warning"></i>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">This semester</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                    
+                    <!-- Session Filter -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0"><i class="fas fa-filter"></i> Filter Courses</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Academic Session</label>
+                                    <select class="form-select" id="sessionFilter">
+                                        <option value="all">All Sessions</option>
+                                        <option value="2025/2026-1" selected>2025/2026 Semester 1</option>
+                                        <option value="2024/2025-2">2024/2025 Semester 2</option>
+                                        <option value="2024/2025-1">2024/2025 Semester 1</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Course Status</label>
+                                    <select class="form-select" id="statusFilter">
+                                        <option value="all">All Status</option>
+                                        <option value="UM">Core (UM)</option>
+                                        <option value="E">Elective (E)</option>
+                                        <option value="O">Optional (O)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-success w-100" onclick="loadMyCourses()">
+                                            <i class="fas fa-sync-alt"></i> Refresh
+                                        </button>
+                                        <button class="btn btn-outline-success" onclick="exportMyCourses()">
+                                            <i class="fas fa-download"></i> Export
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Courses Table -->
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-list"></i> Registered Course List</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Course Code</th>
+                                            <th>Course Name</th>
+                                            <th>Section</th>
+                                            <th>Session</th>
+                                            <th>Year</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="myCoursesBody">
+                                        <!-- Will be populated by studentCourseController.js -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card-footer bg-light">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i>
+                                        Showing courses registered under your matric number
+                                    </small>
+                                </div>
+                                <div class="col-md-6 text-end">
+                                    <button class="btn btn-sm btn-outline-success" onclick="printMyCourses()">
+                                        <i class="fas fa-print"></i> Print Schedule
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        },
+        
+        async loadTimetable() {
+            const currentSession = TTMS.getCurrentSession();
+            
+            return `
+                <div class="container-fluid">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2 class="text-success">
+                            <i class="fas fa-calendar-alt"></i> Course List
+                        </h2>
+                        <div class="badge bg-success fs-6">
+                            <i class="fas fa-calendar me-1"></i> ${currentSession.sesi}-${currentSession.semester}
+                        </div>
+                    </div>
+                    
+                    <!-- Session Selector -->
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <div class="row align-items-center">
+                                <div class="col-md-4">
+                                    <h5 class="mb-0">Current Session</h5>
+                                    <p class="text-muted mb-0" id="currentSessionInfo">${currentSession.sesi}-${currentSession.semester}</p>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" placeholder="Search courses..." id="courseSearch">
+                                        <button class="btn btn-outline-success" type="button">
+                                            <i class="fas fa-search"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <button class="btn btn-success" onclick="UTM_TVAS.loadView('session')">
+                                        <i class="fas fa-exchange-alt me-1"></i> Change Session
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Course Table -->
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="fas fa-list"></i> All Courses</h5>
+                                <span class="badge bg-light text-success" id="totalCourses">0 courses</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Course Code</th>
+                                            <th>Course Name</th>
+                                            <th>Sections</th>
+                                            <th>Lecturers</th>
+                                            <th>Students</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="courseBody">
+                                        <!-- Will be populated by courseController.js -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card-footer bg-light">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i>
+                                        Showing all courses for current session
+                                    </small>
+                                </div>
+                                <div class="col-md-6 text-end">
+                                    <button class="btn btn-sm btn-outline-success" onclick="loadCourses()">
+                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Registered Courses Summary -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-user-graduate"></i> My Registered Courses in This Session</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="myCoursesSummary">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-success"></div>
+                                    <p class="text-muted mt-2">Loading your registered courses...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        },
+        
+        async loadSession() {
+            return `
+                <div class="container-fluid">
+                    <h2 class="text-success mb-4">
+                        <i class="fas fa-calendar"></i> Session Management
+                    </h2>
+                    
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-database"></i> Available Sessions</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Session-Semester</th>
+                                            <th>Start Date</th>
+                                            <th>End Date</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sessionBody">
+                                        <!-- Will be populated by sessionController.js -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        },
+        
+        async loadClashDetection() {
+            return `
+                <div class="container-fluid">
+                    <div class="text-center py-5">
+                        <div class="spinner-border text-warning" style="width: 3rem; height: 3rem;"></div>
+                        <p class="mt-3 text-muted">Loading clash detection...</p>
+                    </div>
+                </div>
+            `;
+        },
+        
+        
+    async loadRoomUtilization() {
+        return `
+            <div class="container-fluid">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2 class="text-success">
+                        <i class="fas fa-door-open"></i> Room Utilization
+                    </h2>
+                    <div class="badge bg-success fs-6">
+                        <i class="fas fa-calendar me-1"></i> ${TTMS.getCurrentSession().sesi}-${TTMS.getCurrentSession().semester}
+                    </div>
+                </div>
+                
+                <!-- This container will be populated by loadRoomUtilizationFast -->
+                <div id="roomUtilizationContainer">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-success"></div>
+                        <p class="mt-2 text-muted">Loading room utilization data...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+        
+        async loadHome() {
+            return `
+                <div class="container-fluid">
+                    <div class="jumbotron bg-light rounded p-5 mt-4">
+                        <h1 class="display-4 text-success">Welcome to UTM-TVAS</h1>
+                        <p class="lead">UTM Timetable Visualization and Analysis System</p>
+                        <hr class="my-4">
+                        <p>Connected to TTMS API. View real-time timetable data, detect clashes, and analyze room utilization.</p>
+                        <button class="btn btn-success btn-lg" onclick="UTM_TVAS.loadView('dashboard')">
+                            <i class="fas fa-chart-line"></i> Go to Dashboard
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    };
+    
+    // Initialize when page loads
+    $(document).ready(function() {
+        console.log("Document ready, initializing UTM_TVAS...");
+        
+        // Check authentication first
+        if (!isAuthenticated()) {
+            window.location.href = "views/start.html";
+            return;
+        }
+        
+        // Initialize the application
+        UTM_TVAS.init();
+    });
+</script>
+
+<script>
+    // Fix for missing formatDate function
+    $(document).ready(function() {
+        // Make formatDate available globally
+        window.formatDate = function(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime())) return dateStr;
+                return date.toLocaleDateString('en-MY', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+            } catch (error) {
+                return dateStr;
+            }
+        };
+        
+        // Make showAlert available globally
+        window.showAlert = function(message, type = 'info') {
+            // Remove any existing alerts
+            $('.alert-dismissible').remove();
+            
+            // Create new alert
+            const alertHtml = `
+                <div class="alert alert-${type} alert-dismissible fade show position-fixed top-0 end-0 m-3" style="z-index: 9999;">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            $('body').append(alertHtml);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                $('.alert-dismissible').alert('close');
+            }, 5000);
+        };
+    });
+</script>
+</body>
+</html>
