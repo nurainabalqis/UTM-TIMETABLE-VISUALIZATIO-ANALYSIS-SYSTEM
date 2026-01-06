@@ -1,0 +1,215 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-list text-success me-2"></i>
+                {{ $parent.user.role === 'student' ? 'Course Catalog' : 
+                   $parent.user.role === 'lecturer' ? 'Teaching Schedule' : 'Course Management' }}
+            </h2>
+            <p class="text-muted mb-0">
+                Browse and filter courses by session and faculty
+            </p>
+        </div>
+        <div class="badge bg-success fs-6">
+            <i class="fas fa-calendar me-1"></i> {{ currentSession.sesi }}-{{ currentSession.semester }}
+        </div>
+    </div>
+    
+    <!-- Filter Section -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label">Academic Session</label>
+                    <select class="form-select" v-model="filterSession" @change="applyFilters">
+                        <option value="current">Current Session Only</option>
+                        <option value="2025/2026-1">2025/2026 Semester 1</option>
+                        <option value="2024/2025-2">2024/2025 Semester 2</option>
+                        <option value="2024/2025-1">2024/2025 Semester 1</option>
+                        <option value="2023/2024-2">2023/2024 Semester 2</option>
+                        <option value="all">All Sessions</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Faculty/Department</label>
+                    <select class="form-select" v-model="filterFaculty" @change="applyFilters">
+                        <option value="all">All Faculties</option>
+                        <option value="FK">Computing (FK)</option>
+                        <option value="FKE">Electrical (FKE)</option>
+                        <option value="FKM">Mechanical (FKM)</option>
+                        <option value="FSSH">Social Sciences</option>
+                        <option value="FAB">Business (FAB)</option>
+                        <option value="FS">Science (FS)</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Search Courses</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" placeholder="Search by code, name, or lecturer..." 
+                               v-model="searchTerm" @input="applyFilters">
+                        <button class="btn btn-outline-success" type="button">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-utm w-100" @click="loadAllCourses">
+                        <i class="fas fa-sync-alt me-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Statistics Summary -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-light">
+                <div class="card-body text-center py-3">
+                    <h4 class="text-primary mb-1">{{ filteredCourses.length }}</h4>
+                    <small class="text-muted">Showing</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light">
+                <div class="card-body text-center py-3">
+                    <h4 class="text-success mb-1">{{ stats.currentCourses }}</h4>
+                    <small class="text-muted">Current Session</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light">
+                <div class="card-body text-center py-3">
+                    <h4 class="text-info mb-1">{{ stats.totalStudents }}</h4>
+                    <small class="text-muted">Total Students</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light">
+                <div class="card-body text-center py-3">
+                    <h4 class="text-warning mb-1">{{ stats.uniqueLecturers }}</h4>
+                    <small class="text-muted">Unique Lecturers</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Courses Table -->
+    <div class="card">
+        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="fas fa-book me-2"></i>
+                Course List
+            </h5>
+            <div>
+                <span class="badge bg-light text-dark me-2">{{ filteredCourses.length }} courses</span>
+                <button v-if="$parent.user.role === 'admin'" class="btn btn-sm btn-light">
+                    <i class="fas fa-download me-1"></i> Export
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div v-if="isLoading" class="text-center py-5">
+                <div class="loading mb-3"></div>
+                <p class="text-muted">Loading courses from TTMS...</p>
+            </div>
+            
+            <div v-else-if="filteredCourses.length === 0" class="text-center py-5">
+                <i class="fas fa-book-open fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No courses match your filters</h5>
+                <p class="text-muted">Try changing session or search criteria</p>
+            </div>
+            
+            <div v-else class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>#</th>
+                            <th>Course Code</th>
+                            <th>Course Name</th>
+                            <th>Session</th>
+                            <th>Sections</th>
+                            <th>Lecturer</th>
+                            <th>Students</th>
+                            <th>Room</th>
+                            <th v-if="$parent.user.role !== 'student'">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(course, index) in filteredCourses" :key="index" 
+                            :class="{'table-success': course.sesi === currentSession.sesi && course.semester.toString() === currentSession.semester}">
+                            <td>{{ index + 1 }}</td>
+                            <td>
+                                <strong class="text-primary">{{ course.kod_subjek || 'N/A' }}</strong>
+                                <span v-if="course.sesi === currentSession.sesi && course.semester.toString() === currentSession.semester" 
+                                      class="badge bg-success ms-2">Current</span>
+                            </td>
+                            <td>{{ course.nama_subjek || 'N/A' }}</td>
+                            <td>
+                                <span class="badge bg-secondary">{{ course.sesi }}-{{ course.semester }}</span>
+                            </td>
+                            <td>
+                                <span class="badge bg-info">{{ course.bil_seksyen || '1' }} section(s)</span>
+                            </td>
+                            <td>
+                                <small>{{ course.kod_pensyarah || 'N/A' }}</small>
+                                <br>
+                                <span class="text-muted small">{{ course.nama_pensyarah || '' }}</span>
+                            </td>
+                            <td>
+                                <span class="badge bg-success">{{ course.bil_pelajar || '0' }}</span>
+                            </td>
+                            <td>
+                                <code>{{ course.kod_bilik || 'TBA' }}</code>
+                            </td>
+                            <td v-if="$parent.user.role !== 'student'">
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" @click="viewCourseDetails(course.kod_subjek)">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button v-if="$parent.user.role === 'admin'" class="btn btn-outline-warning">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <!-- Pagination -->
+                <nav v-if="filteredCourses.length > 50" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item disabled">
+                            <a class="page-link" href="#">Previous</a>
+                        </li>
+                        <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                        <li class="page-item"><a class="page-link" href="#">2</a></li>
+                        <li class="page-item"><a class="page-link" href="#">3</a></li>
+                        <li class="page-item">
+                            <a class="page-link" href="#">Next</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+        <div class="card-footer bg-light">
+            <div class="row">
+                <div class="col-md-6">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Data from TTMS • Updated: {{ new Date().toLocaleTimeString() }}
+                    </small>
+                </div>
+                <div class="col-md-6 text-end">
+                    <small class="text-muted">
+                        {{ stats.totalCourses }} total courses in database
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,161 +1,435 @@
-// controllers/dashboardController.js - UPDATED FOR TTMS SYNC
-function loadDashboard() {
-    if (!isAuthenticated()) {
-        window.location.href = "views/start.html";
-        return;
-    }
-    
-    const user = getCurrentUser();
-    console.log(`Loading dashboard for ${user.name}`);
-    
-    // Load real statistics from TTMS
-    updateDashboardStats();
-    
-    // Load real charts data
-    loadChartsData();
-}
-
-function updateDashboardStats() {
-    // Update stats cards with real data
-    TTMS.fetchDashboardStats().then(stats => {
-        $('#courseCount').text(stats.courseCount);
-        $('#sessionCount').text(stats.sessionCount);
-        $('#studentCount').text(stats.studentCount);
-        $('#currentSession').text(stats.currentSession);
-    }).catch(error => {
-        console.error("Error updating stats:", error);
-        $('#courseCount').text('0');
-        $('#sessionCount').text('0');
-        $('#studentCount').text('0');
-    });
-}
-
-function loadChartsData() {
-    // Load real data for charts
-    loadCourseDistributionChart();
-    loadSessionTimelineChart();
-    loadRoomUtilizationChart();
-}
-
-function loadCourseDistributionChart() {
-    TTMS.fetchCourses().then(courses => {
-        if (!courses || courses.length === 0) return;
-        
-        // Group courses by faculty/department
-        const deptCount = {};
-        courses.forEach(course => {
-            const dept = course.kod_subjek ? course.kod_subjek.substring(0, 3) : 'Other';
-            deptCount[dept] = (deptCount[dept] || 0) + 1;
-        });
-        
-        // Prepare chart data
-        const chartData = [['Department', 'Number of Courses']];
-        Object.entries(deptCount).forEach(([dept, count]) => {
-            chartData.push([dept, count]);
-        });
-        
-        // Draw chart
-        google.charts.setOnLoadCallback(() => {
-            const data = google.visualization.arrayToDataTable(chartData);
-            const options = {
-                title: 'Course Distribution by Department',
-                is3D: true,
-                colors: ['#2E7D32', '#4CAF50', '#81C784', '#A5D6A7', '#C8E6C9'],
-                backgroundColor: 'transparent'
-            };
+// controllers/dashboardController.js
+const DashboardController = {
+    // Load dashboard data - REAL DATA ONLY
+    async loadDashboardData() {
+        try {
+            console.log('Loading REAL dashboard data from TTMS...');
+            const user = JSON.parse(localStorage.getItem('user'));
+            if (!user) {
+                console.error('No user found');
+                return null;
+            }
             
-            const chart = new google.visualization.PieChart(document.getElementById('courseChart'));
-            chart.draw(data, options);
-        });
-    });
-}
-
-function loadSessionTimelineChart() {
-    TTMS.fetchSessions().then(sessions => {
-        if (!sessions || sessions.length === 0) return;
-        
-        // Prepare timeline data
-        const chartData = [['Session', 'Start', 'End']];
-        sessions.slice(0, 10).forEach(session => {
-            chartData.push([
-                `${session.sesi}-${session.semester}`,
-                new Date(session.tarikh_mula),
-                new Date(session.tarikh_tamat)
+            // Fetch REAL data from TTMS
+            const [courses, sessions, lecturers, rooms] = await Promise.all([
+                TTMS.fetchCourses(),
+                TTMS.fetchSessions(),
+                TTMS.fetchLecturers(),
+                TTMS.fetchRooms()
             ]);
-        });
-        
-        // Draw timeline chart
-        google.charts.setOnLoadCallback(() => {
-            const data = google.visualization.arrayToDataTable(chartData);
-            const options = {
-                title: 'Session Timeline',
-                colors: ['#1976D2'],
-                backgroundColor: 'transparent'
+            
+            // Fetch student courses only if user is a student
+            let myCourses = [];
+            if (user.role === 'student') {
+                myCourses = await TTMS.fetchMyCourses(user.username);
+            }
+            
+            console.log('REAL Data fetched from TTMS:', {
+                courses: courses.length,
+                sessions: sessions.length,
+                lecturers: lecturers.length,
+                rooms: rooms.length,
+                myCourses: myCourses.length
+            });
+            
+            // Calculate REAL statistics
+            const currentSession = TTMS.getCurrentSession();
+            
+            // Calculate total students from REAL data
+            const totalStudents = await TTMS.fetchTotalStudents();
+            
+            // Filter my courses for current session
+            const currentMyCourses = myCourses.filter(c => 
+                c.sesi === currentSession.sesi && 
+                c.semester.toString() === currentSession.semester
+            );
+            
+            const stats = {
+                myCourses: currentMyCourses.length,
+                totalCourses: courses.length,
+                totalStudents: totalStudents,
+                totalSessions: sessions.length,
+                totalLecturers: lecturers.length,
+                totalRooms: rooms.length,
+                roomUtilization: 0,
+                currentSession: `${currentSession.sesi}-${currentSession.semester}`,
+                dataSource: 'TTMS Live',
+                lastUpdated: new Date().toLocaleTimeString()
             };
             
-            const chart = new google.visualization.Timeline(document.getElementById('timelineChart'));
-            chart.draw(data, options);
-        });
-    });
-}
-
-function loadRoomUtilizationChart() {
-    TTMS.fetchRooms().then(rooms => {
-        if (!rooms || rooms.length === 0) {
-            // Use mock data if no room data
-            const mockData = [
-                ['Room Type', 'Count'],
-                ['Lecture Halls', 15],
-                ['Labs', 8],
-                ['Tutorial Rooms', 12],
-                ['Meeting Rooms', 5]
-            ];
+            // Calculate room utilization
+            try {
+                const roomUtil = await TTMS.fetchRoomUtilization();
+                stats.roomUtilization = roomUtil.averageUtilization || 0;
+            } catch (e) {
+                console.warn('Could not fetch room utilization:', e);
+            }
+            
+            console.log('REAL Dashboard stats:', stats);
+            return { stats, user };
+            
+        } catch (error) {
+            console.error('ERROR loading REAL dashboard data:', error);
+            
+            // Return empty stats on error
+            return {
+                stats: {
+                    myCourses: 0,
+                    totalCourses: 0,
+                    totalStudents: 0,
+                    totalSessions: 0,
+                    totalLecturers: 0,
+                    totalRooms: 0,
+                    roomUtilization: 0,
+                    currentSession: '2025/2026-1',
+                    dataSource: 'TTMS Error',
+                    lastUpdated: 'Error loading data'
+                },
+                error: error.message
+            };
+        }
+    },
+    
+    // Initialize charts with REAL data
+    async initCharts() {
+        console.log('Initializing charts with REAL TTMS data...');
+        
+        try {
+            // Load Google Charts if not already loaded
+            if (!window.google || !window.google.charts) {
+                console.log('Loading Google Charts...');
+                await new Promise((resolve, reject) => {
+                    google.charts.load('current', { 
+                        packages: ['corechart', 'bar', 'line'] 
+                    });
+                    google.charts.setOnLoadCallback(resolve);
+                    
+                    // Timeout after 10 seconds
+                    setTimeout(() => reject(new Error('Google Charts load timeout')), 10000);
+                });
+            }
+            
+            // Small delay to ensure DOM is ready
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Load all charts with REAL data
+            await Promise.all([
+                this.drawWorkloadChart(),
+                this.drawWeeklyChart(),
+                this.drawPeakHoursChart(),
+                this.drawRoomWeeklyHoursChart()
+            ]);
+            
+            console.log('Charts initialized with REAL data');
+            
+        } catch (error) {
+            console.error('ERROR initializing charts:', error);
+        }
+    },
+    
+    // Draw workload chart with REAL data
+    async drawWorkloadChart() {
+        try {
+            console.log('Drawing REAL workload chart...');
+            const workloadData = await TTMS.fetchLecturerWorkload();
+            const container = document.getElementById('workloadChart');
+            
+            if (!container) {
+                console.warn('Workload chart container not found');
+                return;
+            }
+            
+            if (!workloadData || workloadData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <i class="fas fa-chart-pie fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">No lecturer data available from TTMS</p>
+                        <small class="text-muted">TTMS may not have lecturer data for current session</small>
+                    </div>
+                `;
+                return;
+            }
             
             google.charts.setOnLoadCallback(() => {
-                const data = google.visualization.arrayToDataTable(mockData);
+                const data = new google.visualization.DataTable();
+                data.addColumn('string', 'Lecturer');
+                data.addColumn('number', 'Hours');
+                data.addColumn({ type: 'string', role: 'tooltip' });
+                
+                workloadData.forEach(item => {
+                    const shortName = item.lecturer.length > 20 ? 
+                        item.lecturer.substring(0, 20) + '...' : item.lecturer;
+                    data.addRow([
+                        shortName,
+                        item.hours,
+                        `${item.lecturer}\n${item.courseCount} courses\n${item.hours} hours`
+                    ]);
+                });
+                
                 const options = {
-                    title: 'Room Distribution',
-                    pieHole: 0.4,
-                    colors: ['#1976D2', '#2196F3', '#64B5F6', '#90CAF9'],
-                    backgroundColor: 'transparent'
+                    title: 'Top 10 Lecturer Workload (Real TTMS Data)',
+                    is3D: false,
+                    colors: ['#2E7D32', '#4CAF50', '#66BB6A', '#81C784', '#A5D6A7'],
+                    backgroundColor: 'transparent',
+                    chartArea: { width: '90%', height: '75%' },
+                    legend: { position: 'labeled' },
+                    pieSliceText: 'value'
                 };
                 
-                const chart = new google.visualization.PieChart(document.getElementById('roomChart'));
+                const chart = new google.visualization.PieChart(container);
                 chart.draw(data, options);
+                
+                console.log('REAL Workload chart drawn with', workloadData.length, 'lecturers');
             });
-            return;
+            
+        } catch (error) {
+            console.error('ERROR drawing REAL workload chart:', error);
+            const container = document.getElementById('workloadChart');
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Could not load workload chart from TTMS
+                    </div>
+                `;
+            }
+        }
+    },
+    
+    // Draw weekly usage chart with REAL data
+    async drawWeeklyChart() {
+        try {
+            console.log('Drawing REAL weekly chart...');
+            const weeklyData = await TTMS.fetchWeeklyUsagePattern();
+            const container = document.getElementById('weeklyChart');
+            
+            if (!container) {
+                console.warn('Weekly chart container not found');
+                return;
+            }
+            
+            if (!weeklyData) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <i class="fas fa-calendar fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">No schedule data available from TTMS</p>
+                        <small class="text-muted">TTMS may not have schedule data for current session</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            google.charts.setOnLoadCallback(() => {
+                const data = new google.visualization.DataTable();
+                data.addColumn('string', 'Day');
+                data.addColumn('number', 'Morning (8AM-12PM)');
+                data.addColumn('number', 'Afternoon (2PM-6PM)');
+                data.addColumn('number', 'Evening (6PM-10PM)');
+                
+                weeklyData.days.forEach((day, index) => {
+                    data.addRow([
+                        day,
+                        weeklyData.morning[index] || 0,
+                        weeklyData.afternoon[index] || 0,
+                        weeklyData.evening[index] || 0
+                    ]);
+                });
+                
+                const options = {
+                    title: 'Weekly Session Distribution (Real TTMS Data)',
+                    colors: ['#FF9800', '#4CAF50', '#2196F3'],
+                    backgroundColor: 'transparent',
+                    hAxis: { title: 'Day of Week' },
+                    vAxis: { title: 'Number of Sessions', minValue: 0 },
+                    chartArea: { width: '80%', height: '70%' },
+                    isStacked: true,
+                    legend: { position: 'top' }
+                };
+                
+                const chart = new google.visualization.ColumnChart(container);
+                chart.draw(data, options);
+                
+                console.log('REAL Weekly chart drawn');
+            });
+            
+        } catch (error) {
+            console.error('ERROR drawing REAL weekly chart:', error);
+            const container = document.getElementById('weeklyChart');
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Could not load weekly chart from TTMS
+                    </div>
+                `;
+            }
+        }
+    },
+    
+    // Draw peak hours chart with REAL data
+    async drawPeakHoursChart() {
+        try {
+            console.log('Drawing REAL peak hours chart...');
+            const peakData = await TTMS.fetchPeakHoursData();
+            const container = document.getElementById('peekHoursChart');
+            
+            if (!container) {
+                console.warn('Peak hours chart container not found');
+                return;
+            }
+            
+            if (!peakData || peakData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <i class="fas fa-chart-line fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">No time slot data available from TTMS</p>
+                        <small class="text-muted">TTMS may not have time data for current session</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            google.charts.setOnLoadCallback(() => {
+                const data = new google.visualization.DataTable();
+                data.addColumn('string', 'Time Slot');
+                data.addColumn('number', 'Session Count');
+                
+                peakData.forEach(item => {
+                    data.addRow([item.slot, item.count]);
+                });
+                
+                const options = {
+                    title: 'Peak Teaching Hours (Real TTMS Data)',
+                    curveType: 'function',
+                    colors: ['#D32F2F'],
+                    backgroundColor: 'transparent',
+                    hAxis: { title: 'Time Slot', slantedText: true },
+                    vAxis: { title: 'Number of Sessions', minValue: 0 },
+                    chartArea: { width: '85%', height: '70%' },
+                    pointSize: 5,
+                    lineWidth: 3
+                };
+                
+                const chart = new google.visualization.LineChart(container);
+                chart.draw(data, options);
+                
+                console.log('REAL Peak hours chart drawn with', peakData.length, 'time slots');
+            });
+            
+        } catch (error) {
+            console.error('ERROR drawing REAL peak hours chart:', error);
+            const container = document.getElementById('peekHoursChart');
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Could not load peak hours chart from TTMS
+                    </div>
+                `;
+            }
+        }
+    },
+    
+    // Draw room weekly hours chart with REAL data
+    async drawRoomWeeklyHoursChart() {
+        try {
+            console.log('Drawing REAL room weekly hours chart...');
+            const roomData = await TTMS.fetchRoomWeeklyHours();
+            const container = document.getElementById('roomWeeklyHoursChart');
+            
+            if (!container) {
+                console.warn('Room weekly hours chart container not found');
+                return;
+            }
+            
+            if (!roomData || roomData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <i class="fas fa-door-open fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">No room usage data available from TTMS</p>
+                        <small class="text-muted">TTMS may not have room booking data for current session</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            google.charts.setOnLoadCallback(() => {
+                const data = new google.visualization.DataTable();
+                data.addColumn('string', 'Room');
+                data.addColumn('number', 'Weekly Hours');
+                data.addColumn({ type: 'string', role: 'tooltip' });
+                
+                roomData.forEach(item => {
+                    const shortName = item.roomCode.length > 10 ? 
+                        item.roomCode.substring(0, 10) + '...' : item.roomCode;
+                    data.addRow([
+                        shortName,
+                        item.hours,
+                        `${item.roomCode}\nType: ${item.roomType}\n${item.courseCount} courses\n${item.hours} hours/week`
+                    ]);
+                });
+                
+                const options = {
+                    title: 'Top 15 Rooms by Weekly Usage Hours (Real TTMS Data)',
+                    colors: ['#1976D2'],
+                    backgroundColor: 'transparent',
+                    hAxis: { 
+                        title: 'Room Code',
+                        slantedText: true,
+                        slantedTextAngle: 45
+                    },
+                    vAxis: { 
+                        title: 'Weekly Hours',
+                        minValue: 0
+                    },
+                    chartArea: { width: '80%', height: '65%' },
+                    legend: { position: 'none' }
+                };
+                
+                const chart = new google.visualization.ColumnChart(container);
+                chart.draw(data, options);
+                
+                console.log('REAL Room weekly hours chart drawn with', roomData.length, 'rooms');
+            });
+            
+        } catch (error) {
+            console.error('ERROR drawing REAL room weekly hours chart:', error);
+            const container = document.getElementById('roomWeeklyHoursChart');
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Could not load room weekly hours chart from TTMS
+                    </div>
+                `;
+            }
+        }
+    },
+    
+    // Refresh dashboard with REAL data
+    async refreshDashboard() {
+        console.log('Refreshing dashboard with REAL TTMS data...');
+        
+        const data = await this.loadDashboardData();
+        
+        if (data && data.stats) {
+            this.updateStatsUI(data.stats);
         }
         
-        // Process real room data
-        const roomTypes = {};
-        rooms.forEach(room => {
-            const type = room.jenis_bilik || 'Unknown';
-            roomTypes[type] = (roomTypes[type] || 0) + 1;
-        });
+        // Reinitialize charts
+        await this.initCharts();
         
-        const chartData = [['Room Type', 'Count']];
-        Object.entries(roomTypes).forEach(([type, count]) => {
-            chartData.push([type, count]);
-        });
+        return data;
+    },
+    
+    // Update stats UI with REAL data
+    updateStatsUI(stats) {
+        console.log('Updating stats UI with REAL data:', stats);
         
-        google.charts.setOnLoadCallback(() => {
-            const data = google.visualization.arrayToDataTable(chartData);
-            const options = {
-                title: 'Room Distribution',
-                pieHole: 0.4,
-                colors: ['#1976D2', '#2196F3', '#64B5F6', '#90CAF9'],
-                backgroundColor: 'transparent'
-            };
-            
-            const chart = new google.visualization.PieChart(document.getElementById('roomChart'));
-            chart.draw(data, options);
-        });
-    });
-}
-
-// Initialize when page loads
-$(document).ready(function() {
-    if ($('#dashboard').length) {
-        loadDashboard();
+        // This will be handled by Vue's reactivity in the actual implementation
+        // For now, we just log it
     }
-});
+};
+
+// Make globally available
+window.DashboardController = DashboardController;

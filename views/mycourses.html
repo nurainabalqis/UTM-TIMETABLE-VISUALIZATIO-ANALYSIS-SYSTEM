@@ -1,0 +1,133 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-graduation-cap text-success me-2"></i>My Registered Courses
+            </h2>
+            <p class="text-muted mb-0">
+                View and manage your course registrations
+            </p>
+        </div>
+        <div class="badge bg-success fs-6">
+            <i class="fas fa-calendar me-1"></i> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+        </div>
+    </div>
+    
+    <!-- Filter Section -->
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <h5 class="mb-0"><i class="fas fa-filter me-2"></i>Filter Courses</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Academic Session</label>
+                    <select class="form-select" v-model="filterSession" @change="applyFilters">
+                        <option value="all">All Sessions</option>
+                        <option value="current">Current Session</option>
+                        <option value="2025/2026-1">2025/2026 Semester 1</option>
+                        <option value="2024/2025-2">2024/2025 Semester 2</option>
+                        <option value="2024/2025-1">2024/2025 Semester 1</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Course Status</label>
+                    <select class="form-select" v-model="filterStatus" @change="applyFilters">
+                        <option value="all">All Status</option>
+                        <option value="UM">Core (UM)</option>
+                        <option value="E">Elective (E)</option>
+                        <option value="O">Optional (O)</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <div class="d-flex gap-2 w-100">
+                        <button class="btn btn-utm w-100" @click="loadStudentCourses">
+                            <i class="fas fa-sync-alt me-2"></i>Refresh
+                        </button>
+                        <button class="btn btn-outline-success" @click="exportCourses">
+                            <i class="fas fa-download"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Courses Table -->
+    <div class="card">
+        <div class="card-header bg-success text-white">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-list me-2"></i>Registered Courses</h5>
+                <span class="badge bg-light text-dark">{{ filteredCourses.length }} courses</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div v-if="isLoading" class="text-center py-5">
+                <div class="loading mb-3"></div>
+                <p class="text-muted">Loading your courses...</p>
+            </div>
+            
+            <div v-else-if="filteredCourses.length === 0" class="text-center py-5">
+                <i class="fas fa-book-open fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No courses found</h5>
+                <p class="text-muted">Try changing your filters</p>
+            </div>
+            
+            <div v-else class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>#</th>
+                            <th>Course Code</th>
+                            <th>Course Name</th>
+                            <th>Section</th>
+                            <th>Session</th>
+                            <th>Year</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(course, index) in filteredCourses" :key="index" 
+                            :class="{'table-success': course.isCurrent}">
+                            <td>{{ index + 1 }}</td>
+                            <td>
+                                <strong>{{ course.kod_subjek || 'N/A' }}</strong>
+                                <span v-if="course.isCurrent" class="badge bg-success ms-2">Current</span>
+                            </td>
+                            <td>{{ course.nama_subjek || 'N/A' }}</td>
+                            <td>
+                                <span class="badge bg-info">Section {{ course.seksyen || 'N/A' }}</span>
+                            </td>
+                            <td>{{ course.sesi || 'N/A' }}-{{ course.semester || 'N/A' }}</td>
+                            <td>{{ course.tahun_kursus || 'N/A' }}</td>
+                            <td>
+                                <span class="badge" 
+                                      :class="{'bg-success': course.status === 'UM', 
+                                               'bg-primary': course.status === 'E',
+                                               'bg-secondary': course.status === 'O'}">
+                                    {{ course.status || 'Registered' }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer bg-light">
+            <div class="row">
+                <div class="col-md-6">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Showing courses registered under your matric number
+                    </small>
+                </div>
+                <div class="col-md-6 text-end">
+                    <button class="btn btn-outline-success btn-sm" @click="exportCourses">
+                        <i class="fas fa-print me-1"></i>Export to CSV
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

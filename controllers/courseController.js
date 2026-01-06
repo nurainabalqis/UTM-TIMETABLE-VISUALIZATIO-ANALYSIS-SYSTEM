@@ -1,151 +1,258 @@
-// controllers/courseController.js - COMPLETE VERSION
-function loadCourses() {
-    if (!isAuthenticated()) {
-        window.location.href = "views/start.html";
-        return;
-    }
-    
-    const user = getCurrentUser();
-    console.log(`Loading courses for ${user.name}`);
-    
-    // Get current session
-    const currentSession = TTMS.getCurrentSession();
-    
-    // Show loading
-    const tbody = $("#courseBody");
-    tbody.html(`
-        <tr>
-            <td colspan="7" class="text-center py-4">
-                <div class="spinner-border spinner-border-sm text-success"></div>
-                Loading courses from TTMS for ${currentSession.sesi}-${currentSession.semester}...
-            </td>
-        </tr>
-    `);
-    
-    // Fetch from TTMS
-    TTMS.fetchCourses().then(data => {
-        tbody.empty();
-        
-        if (data && data.length > 0) {
-            console.log(`Loaded ${data.length} courses from TTMS`);
-            
-            data.forEach((c, index) => {
-                tbody.append(`
-                    <tr>
-                        <td>${index + 1}</td>
-                        <td><strong>${c.kod_subjek || 'N/A'}</strong></td>
-                        <td>${c.nama_subjek || 'N/A'}</td>
-                        <td><span class="badge bg-info">${c.bil_seksyen || '0'} sections</span></td>
-                        <td><span class="badge bg-warning">${c.bil_pensyarah || '0'} lecturers</span></td>
-                        <td><span class="badge bg-success">${c.bil_pelajar || '0'} students</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-primary" onclick="viewCourseDetails('${c.kod_subjek}')">
-                                <i class="fas fa-eye"></i> View Details
-                            </button>
-                        </td>
-                    </tr>
-                `);
-            });
-            
-            // Update course count
-            $('#totalCourses').text(data.length);
-            $('#currentSessionInfo').text(`${currentSession.sesi}-${currentSession.semester}`);
-            
-        } else {
-            tbody.append(`
-                <tr>
-                    <td colspan="7" class="text-center text-muted py-5">
-                        <i class="fas fa-book-open fa-2x mb-3"></i>
-                        <h6>No courses found</h6>
-                        <p class="small">No courses available for ${currentSession.sesi}-${currentSession.semester}</p>
-                    </td>
-                </tr>
-            `);
-        }
-    }).catch(error => {
-        console.error("Error loading courses:", error);
-        tbody.html(`
-            <tr>
-                <td colspan="7" class="text-center text-danger py-4">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h6>Failed to load courses from TTMS</h6>
-                    <p class="small">${error.message || 'Please try again'}</p>
-                    <button class="btn btn-sm btn-outline-success mt-2" onclick="loadCourses()">
-                        <i class="fas fa-redo"></i> Retry
-                    </button>
-                </td>
-            </tr>
-        `);
-    });
-}
+// controllers/courseController.js
+const CourseController = {
+    cache: {
+        courses: null,
+        lastFetch: null,
+        cacheDuration: 2 * 60 * 1000 // 2 minutes cache
+    },
 
-function viewCourseDetails(kod_subjek) {
-    console.log("Viewing course details:", kod_subjek);
-    
-    // Show modal with course details
-    TTMS.fetchCourseDetails(kod_subjek).then(data => {
-        if (data && data.length > 0) {
-            const course = data[0];
-            const modalHtml = `
-                <div class="modal fade" id="courseModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header bg-success text-white">
-                                <h5 class="modal-title">${course.kod_subjek || ''} - ${course.nama_subjek || ''}</h5>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <h6>Course Information</h6>
-                                        <table class="table table-sm">
-                                            <tr><th>Code:</th><td>${course.kod_subjek || 'N/A'}</td></tr>
-                                            <tr><th>Name:</th><td>${course.nama_subjek || 'N/A'}</td></tr>
-                                            <tr><th>Session:</th><td>${course.sesi || 'N/A'}-${course.semester || 'N/A'}</td></tr>
-                                            <tr><th>Sections:</th><td>${course.bil_seksyen || '0'}</td></tr>
-                                            <tr><th>Lecturers:</th><td>${course.bil_pensyarah || '0'}</td></tr>
-                                            <tr><th>Students:</th><td>${course.bil_pelajar || '0'}</td></tr>
-                                        </table>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h6>Sections</h6>
-                                        ${course.seksyen_list && course.seksyen_list.length > 0 ? 
-                                            `<ul class="list-group">
-                                                ${course.seksyen_list.map(sec => 
-                                                    `<li class="list-group-item d-flex justify-content-between">
-                                                        <span>Section ${sec.seksyen || ''}</span>
-                                                        <span class="badge bg-info">${sec.bil_pelajar || '0'} students</span>
-                                                    </li>`
-                                                ).join('')}
-                                            </ul>` :
-                                            '<p class="text-muted">No section details available</p>'
-                                        }
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                <button type="button" class="btn btn-success">View Timetable</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
+    // Load REAL courses from TTMS
+    async loadCourses() {
+        try {
+            const user = AuthController.getCurrentUser();
+            if (!user) {
+                console.error('No user authenticated');
+                return null;
+            }
             
-            // Add modal to body and show it
-            $('body').append(modalHtml);
-            const modal = new bootstrap.Modal(document.getElementById('courseModal'));
-            modal.show();
+            // Check cache
+            const now = Date.now();
+            if (this.cache.courses && this.cache.lastFetch && 
+                (now - this.cache.lastFetch) < this.cache.cacheDuration) {
+                console.log('Using cached REAL courses data');
+                return this.cache.courses;
+            }
             
-            // Remove modal after hidden
-            $('#courseModal').on('hidden.bs.modal', function () {
-                $(this).remove();
+            console.log('Fetching REAL courses from TTMS...');
+            
+            // Get current session
+            const currentSession = TTMS.getCurrentSession();
+            
+            // Fetch REAL courses from TTMS
+            const courses = await TTMS.fetchCourses();
+            
+            if (!courses || courses.length === 0) {
+                console.log('TTMS returned empty courses array');
+                AuthController.showAlert('No course data available from TTMS for current session', 'warning');
+            } else {
+                console.log(`Retrieved ${courses.length} REAL courses from TTMS`);
+            }
+            
+            // Calculate statistics from REAL data
+            const currentCourses = courses.filter(c => 
+                c.sesi === currentSession.sesi && 
+                c.semester.toString() === currentSession.semester
+            );
+            
+            const lecturers = new Set();
+            const faculties = new Set();
+            let totalStudents = 0;
+            
+            currentCourses.forEach(course => {
+                if (course.kod_pensyarah) lecturers.add(course.kod_pensyarah);
+                if (course.kod_subjek) {
+                    const faculty = course.kod_subjek.substring(0, 2);
+                    if (faculty) faculties.add(faculty);
+                }
+                totalStudents += parseInt(course.bil_pelajar) || 0;
             });
-        } else {
-            showAlert('No detailed information available for this course', 'warning');
+            
+            const stats = {
+                totalCourses: courses.length,
+                currentCourses: currentCourses.length,
+                totalStudents: totalStudents,
+                uniqueLecturers: lecturers.size,
+                uniqueFaculties: faculties.size,
+                dataSource: 'TTMS Live',
+                lastUpdated: new Date().toLocaleTimeString()
+            };
+            
+            const result = {
+                courses: courses,
+                stats: stats,
+                currentSession: currentSession,
+                timestamp: now
+            };
+            
+            // Cache the results
+            this.cache.courses = result;
+            this.cache.lastFetch = now;
+            
+            return result;
+            
+        } catch (error) {
+            console.error('ERROR loading REAL courses:', error);
+            AuthController.showAlert('Failed to load REAL courses from TTMS', 'danger');
+            return null;
         }
-    }).catch(error => {
-        console.error("Error fetching course details:", error);
-        showAlert('Failed to load course details', 'danger');
-    });
-}
+    },
+
+    // Filter REAL courses
+    filterCourses(courses, filters = {}) {
+        const {
+            searchTerm = '',
+            sessionFilter = 'current',
+            facultyFilter = 'all'
+        } = filters;
+        
+        const currentSession = TTMS.getCurrentSession();
+        
+        return courses.filter(course => {
+            let sessionMatch = true;
+            let facultyMatch = true;
+            let searchMatch = true;
+            
+            // Session filter
+            if (sessionFilter === 'current') {
+                sessionMatch = course.sesi === currentSession.sesi && 
+                              course.semester.toString() === currentSession.semester;
+            } else if (sessionFilter !== 'all') {
+                const [sesi, semester] = sessionFilter.split('-');
+                sessionMatch = course.sesi === sesi && 
+                              course.semester.toString() === semester;
+            }
+            
+            // Faculty filter
+            if (facultyFilter !== 'all') {
+                facultyMatch = course.kod_subjek && course.kod_subjek.startsWith(facultyFilter);
+            }
+            
+            // Search filter
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                searchMatch = 
+                    (course.kod_subjek && course.kod_subjek.toLowerCase().includes(term)) ||
+                    (course.nama_subjek && course.nama_subjek.toLowerCase().includes(term)) ||
+                    (course.kod_pensyarah && course.kod_pensyarah.toLowerCase().includes(term)) ||
+                    (course.nama_pensyarah && course.nama_pensyarah.toLowerCase().includes(term));
+            }
+            
+            return sessionMatch && facultyMatch && searchMatch;
+        });
+    },
+
+    // Get course statistics from REAL data
+    getCourseStatistics(courses) {
+        const currentSession = TTMS.getCurrentSession();
+        const currentCourses = courses.filter(c => 
+            c.sesi === currentSession.sesi && 
+            c.semester.toString() === currentSession.semester
+        );
+        
+        const lecturers = new Set();
+        const faculties = new Set();
+        let totalStudents = 0;
+        
+        currentCourses.forEach(course => {
+            if (course.kod_pensyarah) lecturers.add(course.kod_pensyarah);
+            if (course.kod_subjek) {
+                const faculty = course.kod_subjek.substring(0, 2);
+                if (faculty) faculties.add(faculty);
+            }
+            totalStudents += parseInt(course.bil_pelajar) || 0;
+        });
+        
+        return {
+            totalCourses: courses.length,
+            currentCourses: currentCourses.length,
+            totalStudents: totalStudents,
+            uniqueLecturers: lecturers.size,
+            uniqueFaculties: faculties.size,
+            byFaculty: this.groupByFaculty(courses),
+            byLevel: this.groupByLevel(courses)
+        };
+    },
+
+    // Group courses by faculty from REAL data
+    groupByFaculty(courses) {
+        const faculties = {};
+        
+        courses.forEach(course => {
+            if (course.kod_subjek) {
+                const facultyCode = course.kod_subjek.substring(0, 2);
+                if (facultyCode) {
+                    faculties[facultyCode] = (faculties[facultyCode] || 0) + 1;
+                }
+            }
+        });
+        
+        return faculties;
+    },
+
+    // Group courses by level from REAL data
+    groupByLevel(courses) {
+        const levels = {};
+        
+        courses.forEach(course => {
+            if (course.kod_subjek) {
+                // Extract level from course code (e.g., "CS"123 -> 1 = level 1)
+                const levelMatch = course.kod_subjek.match(/\d/);
+                if (levelMatch) {
+                    const level = levelMatch[0];
+                    levels[level] = (levels[level] || 0) + 1;
+                }
+            }
+        });
+        
+        return levels;
+    },
+
+    // Clear cache
+    clearCache() {
+        this.cache.courses = null;
+        this.cache.lastFetch = null;
+        console.log('Course cache cleared');
+    },
+
+    // Export REAL courses to CSV
+    exportToCSV(courses, filename = 'ttms_courses_export.csv') {
+        if (courses.length === 0) {
+            AuthController.showAlert('No REAL courses to export', 'warning');
+            return;
+        }
+        
+        const headers = ['Course Code', 'Course Name', 'Session', 'Semester', 'Sections', 'Lecturer Code', 'Students', 'Room', 'Day', 'Time'];
+        
+        const csvContent = [
+            headers.join(','),
+            ...courses.map(course => [
+                `"${course.kod_subjek || ''}"`,
+                `"${course.nama_subjek || ''}"`,
+                `"${course.sesi || ''}"`,
+                `"${course.semester || ''}"`,
+                `"${course.bil_seksyen || '0'}"`,
+                `"${course.kod_pensyarah || ''}"`,
+                `"${course.bil_pelajar || '0'}"`,
+                `"${course.kod_bilik || ''}"`,
+                `"${course.hari || ''}"`,
+                `"${course.masa || ''}"`
+            ].join(','))
+        ].join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        
+        AuthController.showAlert(`Exported ${courses.length} REAL courses from TTMS to CSV`, 'success');
+    },
+
+    // Search REAL courses
+    searchCourses(courses, searchTerm) {
+        if (!searchTerm) return courses;
+        
+        const term = searchTerm.toLowerCase();
+        return courses.filter(course => {
+            return (
+                (course.kod_subjek && course.kod_subjek.toLowerCase().includes(term)) ||
+                (course.nama_subjek && course.nama_subjek.toLowerCase().includes(term)) ||
+                (course.kod_pensyarah && course.kod_pensyarah.toLowerCase().includes(term)) ||
+                (course.nama_pensyarah && course.nama_pensyarah.toLowerCase().includes(term))
+            );
+        });
+    }
+};
+
+// Make globally available
+window.CourseController = CourseController;

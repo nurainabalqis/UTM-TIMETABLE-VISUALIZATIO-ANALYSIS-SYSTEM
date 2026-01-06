@@ -1,0 +1,111 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-door-open text-success me-2"></i>Room Availability
+            </h2>
+            <p class="text-muted mb-0">
+                View room schedules and availability for your courses
+            </p>
+        </div>
+        <div class="badge bg-success fs-6">
+            <i class="fas fa-calendar me-1"></i> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+        </div>
+    </div>
+    
+    <!-- My Course Rooms -->
+    <div class="card mb-4">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0">
+                <i class="fas fa-map-marker-alt me-2"></i>
+                Rooms for My Courses
+            </h5>
+        </div>
+        <div class="card-body">
+            <div v-if="myRoomData.length === 0" class="text-center py-4">
+                <i class="fas fa-door-closed fa-3x text-muted mb-3"></i>
+                <p class="text-muted">No room data available for your courses</p>
+            </div>
+            <div v-else class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Course</th>
+                            <th>Room</th>
+                            <th>Day</th>
+                            <th>Time</th>
+                            <th>Building</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(room, index) in myRoomData" :key="index">
+                            <td>
+                                <strong>{{ room.courseCode }}</strong><br>
+                                <small class="text-muted">{{ room.courseName }}</small>
+                            </td>
+                            <td><code>{{ room.roomCode }}</code></td>
+                            <td>{{ room.day }}</td>
+                            <td>{{ room.time }}</td>
+                            <td>{{ room.building }}</td>
+                            <td>
+                                <span class="badge bg-success">Scheduled</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Room Availability -->
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Peak Hours</h5>
+        </div>
+        <div class="card-body">
+            <div id="peakHoursChart" style="height: 300px;"></div>
+            <div class="alert alert-info mt-3">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong>Tip:</strong> Most crowded times are 10 AM - 12 PM and 2 PM - 4 PM
+            </div>
+        </div>
+    </div>
+    
+    <!-- Quick Room Search -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-search me-2"></i>Find Available Rooms</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Day</label>
+                    <select class="form-select" v-model="searchDay">
+                        <option value="">Any Day</option>
+                        <option value="Monday">Monday</option>
+                        <option value="Tuesday">Tuesday</option>
+                        <option value="Wednesday">Wednesday</option>
+                        <option value="Thursday">Thursday</option>
+                        <option value="Friday">Friday</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Time Slot</label>
+                    <select class="form-select" v-model="searchTime">
+                        <option value="">Any Time</option>
+                        <option value="morning">Morning (8 AM - 12 PM)</option>
+                        <option value="afternoon">Afternoon (2 PM - 6 PM)</option>
+                        <option value="evening">Evening (6 PM - 10 PM)</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-utm w-100" @click="searchRooms">
+                        <i class="fas fa-search me-2"></i>Search
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

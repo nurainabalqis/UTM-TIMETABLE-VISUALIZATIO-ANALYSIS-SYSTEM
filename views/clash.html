@@ -1,0 +1,191 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-exclamation-triangle text-warning me-2"></i>Clash Detection
+            </h2>
+            <p class="text-muted mb-0">
+                Detect and resolve scheduling conflicts in timetables
+            </p>
+        </div>
+        <div class="badge bg-warning fs-6">
+            <i class="fas fa-calendar me-1"></i> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+        </div>
+    </div>
+    
+    <!-- Detection Dashboard -->
+    <div class="card mb-4">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0"><i class="fas fa-search me-2"></i>Detect Timetable Conflicts</h5>
+        </div>
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <p class="mb-0">
+                        This system analyzes TTMS timetable data to detect real scheduling conflicts.
+                        <span class="badge bg-danger ms-1">Time Clashes</span>
+                        <span class="badge bg-warning ms-1">Room Overlaps</span>
+                        <span class="badge bg-info ms-1">Instructor Conflicts</span>
+                    </p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <button class="btn btn-warning" @click="runDetection" :disabled="isRunning">
+                        <i class="fas fa-play-circle me-1"></i>
+                        {{ isRunning ? 'Analyzing...' : 'Run Detection' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Results Area -->
+    <div v-if="isRunning" class="card mb-4">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">
+                <i class="fas fa-search me-2"></i>Analyzing TTMS Timetable Data...
+                <span class="float-end">
+                    <div class="spinner-border spinner-border-sm"></div>
+                </span>
+            </h5>
+        </div>
+        <div class="card-body text-center py-4">
+            <div class="loading mb-3"></div>
+            <h5>Fetching Timetable Data from TTMS</h5>
+            <p class="text-muted">
+                Analyzing {{ $parent.user.role === 'student' ? 'your course schedule' : 
+                           $parent.user.role === 'lecturer' ? 'teaching assignments' : 
+                           'system-wide timetable data' }}...
+            </p>
+            <div class="progress mt-3">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 100%"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Results Display -->
+    <div v-else-if="clashes.length > 0">
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    {{ clashes.length }} Clash{{ clashes.length > 1 ? 'es' : '' }} Detected
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h5><i class="fas fa-info-circle me-2"></i>Action Required</h5>
+                            <p class="mb-0">
+                                Analysis of <strong>{{ totalTimetableEntries }} timetable entries</strong> 
+                                found {{ summary.total }} scheduling conflict{{ summary.total > 1 ? 's' : '' }}.
+                            </p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="small">
+                                <span class="badge bg-danger">{{ summary.time }} Time</span>
+                                <span class="badge bg-warning ms-1">{{ summary.room }} Room</span>
+                                <span class="badge bg-info ms-1">{{ summary.instructor }} Instructor</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Clash List -->
+                <div class="accordion" id="clashAccordion">
+                    <div v-for="(clash, index) in clashes" :key="index" class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button" :class="{ collapsed: index !== 0 }" 
+                                    type="button" data-bs-toggle="collapse" 
+                                    :data-bs-target="'#clash' + index">
+                                <span class="badge me-2" 
+                                      :class="{'bg-danger': clash.severity === 'high',
+                                               'bg-warning': clash.severity === 'medium',
+                                               'bg-info': clash.severity === 'low'}">
+                                    {{ clash.type.toUpperCase() }}
+                                </span>
+                                {{ clash.description }}
+                            </button>
+                        </h2>
+                        <div :id="'clash' + index" class="accordion-collapse collapse" :class="{ show: index === 0 }">
+                            <div class="accordion-body">
+                                <div class="alert" 
+                                     :class="{'alert-danger': clash.severity === 'high',
+                                              'alert-warning': clash.severity === 'medium',
+                                              'alert-info': clash.severity === 'low'}">
+                                    <h6><i class="fas fa-exclamation-circle me-2"></i>Issue Detected:</h6>
+                                    <p class="mb-0">{{ clash.message }}</p>
+                                </div>
+                                
+                                <h6>Affected Sessions:</h6>
+                                <ul>
+                                    <li v-for="(course, cIndex) in clash.courses" :key="cIndex">
+                                        <strong>{{ course.kod_subjek }}</strong>: {{ course.nama_subjek }}
+                                    </li>
+                                </ul>
+                                
+                                <div class="mt-3">
+                                    <button class="btn btn-sm btn-outline-danger me-2">
+                                        <i class="fas fa-flag me-1"></i> Report Issue
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-success" @click="exportReport">
+                                        <i class="fas fa-download me-1"></i> Export Report
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Statistics -->
+        <div class="row">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h1 class="text-danger">{{ summary.total }}</h1>
+                        <p class="text-muted mb-0">Total Clashes</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h1 class="text-warning">{{ summary.time }}</h1>
+                        <p class="text-muted mb-0">Time Conflicts</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h1 class="text-primary">{{ summary.room }}</h1>
+                        <p class="text-muted mb-0">Room Overlaps</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h1 class="text-info">{{ summary.instructor }}</h1>
+                        <p class="text-muted mb-0">Instructor Issues</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- No Clashes Found -->
+    <div v-else-if="clashes.length === 0 && summary.total === 0 && !isRunning" class="text-center py-5">
+        <i class="fas fa-thumbs-up fa-4x text-success mb-3"></i>
+        <h4 class="text-success mb-3">No Clashes Detected!</h4>
+        <p class="text-muted mb-4">
+            Your timetable appears to be conflict-free. Click "Run Detection" to check again.
+        </p>
+        <button class="btn btn-success" @click="runDetection">
+            <i class="fas fa-play-circle me-2"></i> Run Detection Again
+        </button>
+    </div>
+</div>
