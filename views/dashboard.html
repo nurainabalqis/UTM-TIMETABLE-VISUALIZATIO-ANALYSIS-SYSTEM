@@ -218,4 +218,48 @@
             </div>
         </div>
     </div>
+
+    <!-- Admin section (Admin only) -->
+    <div v-if="$parent.user.role === 'admin'" class="card mt-4">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0">
+                <i class="fas fa-download me-2"></i>Administrator Exports
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <button class="btn btn-outline-primary w-100"
+                        onclick="AdminController.exportAllCourses()">
+                    Export All Courses (CSV)
+                </button>
+            </div>
+
+            <div class="mb-3">
+                <input type="text" id="adminStudentId" class="form-control mb-2"
+                    placeholder="Student Matric Number">
+                <button class="btn btn-outline-success w-100"
+                        onclick="AdminController.exportStudentTimetable(
+                            document.getElementById('adminStudentId').value)">
+                    Export Student Timetable
+                </button>
+            </div>
+
+            <div class="mb-3">
+                <input type="text" id="adminLecturerId" class="form-control mb-2"
+                    placeholder="Lecturer Staff ID">
+                <button class="btn btn-outline-warning w-100"
+                        onclick="AdminController.exportLecturerTimetable(
+                            document.getElementById('adminLecturerId').value)">
+                    Export Lecturer Timetable
+                </button>
+            </div>
+
+            <div>
+                <button class="btn btn-outline-danger w-100"
+                        onclick="AdminController.exportSystemClashes()">
+                    Export System Clash Report
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
