@@ -1,4 +1,5 @@
-// models/ttmsModel.js
+// models/ttmsModel.js - CORRECTED VERSION
+
 const TTMS = {
     BASE_URL: "http://web.fc.utm.my/ttms/web_man_webservice_json.cgi",
 
@@ -24,7 +25,6 @@ const TTMS = {
         }
     },
 
-    
     // Current session management
     getCurrentSession() {
         const saved = localStorage.getItem('currentSession');
@@ -45,7 +45,6 @@ const TTMS = {
         try {
             console.log(`Attempting login for ${username}`);
             
-            // REAL TTMS LOGIN - using entity=authentication (not entity=auth)
             const url = `${this.BASE_URL}?entity=authentication&login=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
             console.log('TTMS Login URL:', url);
             
@@ -56,29 +55,24 @@ const TTMS = {
             try {
                 const data = JSON.parse(text);
                 
-                // Check if response is an array (successful login returns array)
                 if (Array.isArray(data) && data.length > 0) {
                     const user = data[0];
                     return {
                         status: "success",
                         nama: user.full_name || user.login_name,
-                        description: user.description || 'Student', // THIS IS THE KEY!
+                        description: user.description || 'Student',
                         session_id: user.session_id,
                         email: user.email,
                         login_name: user.login_name
                     };
-                } 
-                // Check if it's an object with status
-                else if (data && data.status === "success") {
+                } else if (data && data.status === "success") {
                     return {
                         status: "success",
                         nama: data.full_name || username,
                         description: data.description || 'Student',
                         session_id: data.session_id
                     };
-                } 
-                // Login failed
-                else {
+                } else {
                     return { 
                         status: "error", 
                         message: data.message || "Invalid credentials" 
@@ -123,7 +117,6 @@ const TTMS = {
             } catch (parseError) {
                 console.error('Failed to parse as JSON, trying to extract JSON...');
                 
-                // Try to extract JSON from response
                 const jsonMatch = text.match(/\[.*\]|\{.*\}/s);
                 if (jsonMatch) {
                     try {
@@ -143,13 +136,11 @@ const TTMS = {
                 console.log(`SUCCESS: Retrieved ${data.length} REAL courses from TTMS`);
                 return data;
             } else if (data && typeof data === 'object') {
-                // Check for nested data
                 if (data.subjek && Array.isArray(data.subjek)) {
                     console.log(`SUCCESS: Retrieved ${data.subjek.length} REAL courses from TTMS (nested)`);
                     return data.subjek;
                 }
                 
-                // Convert object to array
                 const arr = Object.values(data);
                 if (Array.isArray(arr[0])) {
                     console.log(`SUCCESS: Retrieved ${arr[0].length} REAL courses from TTMS (nested array)`);
@@ -165,71 +156,9 @@ const TTMS = {
             
         } catch (error) {
             console.error("ERROR fetching REAL courses:", error);
-            // NO FALLBACK - return empty array
             return [];
         }
     },
-    
-    // Get lecturers - REAL TTMS CALL
-    /*async fetchLecturers() {
-        try {
-            const session = this.getCurrentSession();
-            const url = `${this.BASE_URL}?entity=pensyarah&sesi=${session.sesi}&semester=${session.semester}`;
-            console.log('REAL TTMS Lecturers URL:', url);
-
-            const response = await fetch(url);
-            const text = await response.text();
-
-            const data = this.parseTTMSResponse(text, 'Lecturers');
-            if (!data) return [];
-
-            if (Array.isArray(data)) {
-                console.log(`✅ Retrieved ${data.length} REAL lecturers`);
-                return data;
-            }
-
-            if (typeof data === 'object') {
-                const arr = Object.values(data);
-                console.log(`✅ Retrieved ${arr.length} REAL lecturers`);
-                return arr;
-            }
-
-            return [];
-        } catch (error) {
-            console.error('ERROR fetching lecturers:', error);
-            return [];
-        }
-    },*/
-    
-    // Get rooms - REAL TTMS CALL
-    /*async fetchRooms() {
-        try {
-            const url = `${this.BASE_URL}?entity=bilik`;
-            console.log('REAL TTMS Rooms URL:', url);
-
-            const response = await fetch(url);
-            const text = await response.text();
-
-            const data = this.parseTTMSResponse(text, 'Rooms');
-            if (!data) return [];
-
-            if (Array.isArray(data)) {
-                console.log(`✅ Retrieved ${data.length} REAL rooms`);
-                return data;
-            }
-
-            if (typeof data === 'object') {
-                const arr = Object.values(data);
-                console.log(`✅ Retrieved ${arr.length} REAL rooms`);
-                return arr;
-            }
-
-            return [];
-        } catch (error) {
-            console.error('ERROR fetching rooms:', error);
-            return [];
-        }
-    },*/
     
     // Get sessions - REAL TTMS CALL
     async fetchSessions() {
@@ -298,7 +227,248 @@ const TTMS = {
         }
     },
     
-    // ============ ANALYTICS DATA (ADDED FOR DASHBOARD CHARTS) ============
+    // ============ ROOM FUNCTIONS ============
+    
+    // Get REAL rooms from TTMS
+    async fetchRooms() {
+        try {
+            console.log('📊 Fetching REAL rooms from TTMS...');
+            const url = `${this.BASE_URL}?entity=ruang`;
+            console.log('TTMS Rooms URL:', url);
+
+            const response = await fetch(url);
+            const text = await response.text();
+
+            // Parse response
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.error('Failed to parse rooms JSON, trying to extract...');
+                const jsonMatch = text.match(/\[.*\]|\{.*\}/s);
+                if (jsonMatch) {
+                    try {
+                        data = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        console.error('Could not extract valid JSON');
+                        return [];
+                    }
+                } else {
+                    return [];
+                }
+            }
+
+            // Process data based on structure
+            if (Array.isArray(data)) {
+                console.log(`✅ Retrieved ${data.length} REAL rooms from TTMS`);
+                return data;
+            } else if (data && typeof data === 'object') {
+                const arr = Object.values(data);
+                console.log(`✅ Retrieved ${arr.length} REAL rooms from TTMS`);
+                return arr;
+            }
+
+            return [];
+        } catch (error) {
+            console.error("ERROR fetching REAL rooms:", error);
+            return [];
+        }
+    },
+    
+    // Get room schedule/timetable
+    async fetchRoomSchedule(roomCode, sesi = null, semester = null) {
+        try {
+            const session = sesi ? { sesi, semester } : this.getCurrentSession();
+            console.log(`📅 Fetching schedule for room ${roomCode} in ${session.sesi}-${session.semester}`);
+
+            const url = `${this.BASE_URL}?entity=jadual_ruang&sesi=${session.sesi}&semester=${session.semester}&kod_ruang=${encodeURIComponent(roomCode)}`;
+            console.log('Room Schedule URL:', url);
+
+            const response = await fetch(url);
+            const text = await response.text();
+
+            // Parse response
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                const jsonMatch = text.match(/\[.*\]|\{.*\}/s);
+                if (jsonMatch) {
+                    try {
+                        data = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        return [];
+                    }
+                } else {
+                    return [];
+                }
+            }
+
+            if (Array.isArray(data)) {
+                console.log(`✅ Retrieved ${data.length} schedule entries for room ${roomCode}`);
+                return data;
+            }
+
+            return [];
+        } catch (error) {
+            console.error("ERROR fetching room schedule:", error);
+            return [];
+        }
+    },
+    
+    // Get comprehensive room utilization data
+    async fetchRoomUtilizationAnalysis() {
+        try {
+            console.log('📊 Starting comprehensive room utilization analysis...');
+            
+            // 1. Get all rooms
+            const rooms = await this.fetchRooms();
+            if (rooms.length === 0) {
+                console.warn('⚠️ No rooms found in TTMS');
+                return { rooms: [], analysis: null, charts: null };
+            }
+
+            console.log(`Found ${rooms.length} rooms in TTMS`);
+            
+            // For now, return basic analysis (batch loading schedules can be heavy)
+            const analysis = this.analyzeBasicRoomUtilization(rooms);
+            const chartData = this.prepareRoomChartData(analysis);
+        
+            console.log('✅ Basic room utilization analysis complete');
+            return {
+                rooms: rooms,
+                analysis: analysis,
+                charts: chartData,
+                totalRooms: rooms.length
+            };
+            
+        } catch (error) {
+            console.error("ERROR in room utilization analysis:", error);
+            return { rooms: [], analysis: null, charts: null, error: error.message };
+        }
+    },
+    
+    // Basic room analysis (without schedules for now)
+    analyzeBasicRoomUtilization(rooms) {
+        const analysis = {
+            byType: {},
+            byFaculty: {},
+            byCapacity: { small: 0, medium: 0, large: 0, extraLarge: 0 },
+            detailedRooms: []
+        };
+
+        // Classify room types
+        const classifyRoomType = (room) => {
+            const code = room.kod_ruang || '';
+            const name = (room.nama_ruang || '').toUpperCase();
+            
+            if (code.includes('DK') || name.includes('DEWAN') || name.includes('HALL')) {
+                return 'Lecture Hall';
+            } else if (code.includes('LAB') || code.includes('MPK') || name.includes('LABORATORY') || name.includes('MAKMAL')) {
+                return 'Laboratory';
+            } else if (code.includes('BK') || name.includes('BILIK KULIAH') || name.includes('CLASSROOM') || name.includes('LECTURE')) {
+                return 'Classroom';
+            } else if (code.includes('OF') || name.includes('OFFICE')) {
+                return 'Office';
+            } else if (code.includes('SL') || name.includes('LOUNGE')) {
+                return 'Student Lounge';
+            } else {
+                return room.jenis || 'Other';
+            }
+        };
+
+        // Process each room
+        rooms.forEach(room => {
+            const roomType = classifyRoomType(room);
+            const faculty = room.kod_fakulti || 'Unknown';
+            const capacity = parseInt(room.kapasiti) || 0;
+
+            // Count by type
+            analysis.byType[roomType] = (analysis.byType[roomType] || 0) + 1;
+            
+            // Count by faculty
+            analysis.byFaculty[faculty] = (analysis.byFaculty[faculty] || 0) + 1;
+            
+            // Classify by capacity
+            if (capacity <= 30) analysis.byCapacity.small++;
+            else if (capacity <= 100) analysis.byCapacity.medium++;
+            else if (capacity <= 300) analysis.byCapacity.large++;
+            else analysis.byCapacity.extraLarge++;
+
+            // Add detailed room info
+            analysis.detailedRooms.push({
+                code: room.kod_ruang,
+                name: room.nama_ruang,
+                shortName: room.nama_ruang_singkatan || room.kod_ruang.substring(0, 6),
+                type: roomType,
+                faculty: faculty,
+                department: room.kod_jabatan || '-',
+                capacity: capacity,
+                usageHours: 0, // Will be populated if we have schedules
+                subjectCount: 0,
+                scheduleCount: 0,
+                usageLevel: 'unknown',
+                hoursByDay: { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0 }
+            });
+        });
+
+        // Sort detailed rooms by capacity
+        analysis.detailedRooms.sort((a, b) => b.capacity - a.capacity);
+
+        return analysis;
+    },
+    
+    // Prepare chart data
+    prepareRoomChartData(analysis) {
+        const chartData = {
+            roomTypeDistribution: [],
+            facultyDistribution: [],
+            capacityDistribution: [],
+            topRoomsByCapacity: []
+        };
+
+        // Room type distribution
+        if (analysis.byType) {
+            chartData.roomTypeDistribution = Object.entries(analysis.byType)
+                .map(([type, count]) => ({ type, count }))
+                .sort((a, b) => b.count - a.count);
+        }
+
+        // Faculty distribution
+        if (analysis.byFaculty) {
+            chartData.facultyDistribution = Object.entries(analysis.byFaculty)
+                .map(([faculty, count]) => ({ faculty, count }))
+                .sort((a, b) => b.count - a.count);
+        }
+
+        // Capacity distribution
+        if (analysis.byCapacity) {
+            chartData.capacityDistribution = [
+                { category: 'Small (≤30)', count: analysis.byCapacity.small || 0, color: '#4ECDC4' },
+                { category: 'Medium (31-100)', count: analysis.byCapacity.medium || 0, color: '#45B7D1' },
+                { category: 'Large (101-300)', count: analysis.byCapacity.large || 0, color: '#96CEB4' },
+                { category: 'Extra Large (>300)', count: analysis.byCapacity.extraLarge || 0, color: '#FEA47F' }
+            ];
+        }
+
+        // Top rooms by capacity (top 15)
+        if (analysis.detailedRooms) {
+            chartData.topRoomsByCapacity = analysis.detailedRooms
+                .slice(0, 15)
+                .map(room => ({
+                    roomCode: room.code,
+                    shortName: room.shortName,
+                    type: room.type,
+                    usageHours: room.usageHours,
+                    subjectCount: room.subjectCount,
+                    capacity: room.capacity
+                }));
+        }
+
+        return chartData;
+    },
+    
+    // ============ ANALYTICS DATA ============
     
     // Get lecturer workload - REAL CALCULATION from TTMS data
     async fetchLecturerWorkload() {
@@ -335,7 +505,6 @@ const TTMS = {
             .slice(0, 10);
 
         console.log(`✅ Lecturer workload derived for ${result.length} lecturers`);
-
         return result;
     },
     
@@ -352,16 +521,13 @@ const TTMS = {
         const evening = [0, 0, 0, 0, 0];
 
         courses.forEach((course, index) => {
-            // deterministic distribution (NOT random)
             const dayIndex = index % 5;
-
             morning[dayIndex] += Math.round((course.bil_pelajar || 30) / 40);
             afternoon[dayIndex] += Math.round((course.bil_pelajar || 30) / 60);
             evening[dayIndex] += Math.round((course.bil_pelajar || 30) / 80);
         });
 
         console.log('✅ Weekly usage pattern derived from course data');
-
         return { days, morning, afternoon, evening };
     },
         
@@ -376,11 +542,9 @@ const TTMS = {
 
         courses.forEach(course => {
             const students = parseInt(course.bil_pelajar) || 30;
-
             const hour = students > 80 ? 10 :
                         students > 50 ? 9 :
                         students > 30 ? 14 : 16;
-
             const slot = `${hour}:00`;
             slots[slot] = (slots[slot] || 0) + 1;
         });
@@ -400,7 +564,6 @@ const TTMS = {
         }
 
         const avg = stats.reduce((sum, s) => sum + (s.utilization || 0), 0) / stats.length;
-
         return {
             averageUtilization: Math.round(avg)
         };
@@ -440,61 +603,7 @@ const TTMS = {
         }));
 
         console.log(`✅ Room utilization derived for ${result.length} room types`);
-
         return result;
-    },
-    
-    // Get room weekly hours - REAL CALCULATION from TTMS data
-    async fetchRoomWeeklyHours() {
-        try {
-            console.log('📊 Calculating room weekly hours from REAL TTMS data...');
-            const rooms = await this.fetchRooms();
-            const courses = await this.fetchCourses();
-            
-            if (rooms.length === 0 || courses.length === 0) {
-                console.warn('⚠️ No data for room weekly hours calculation');
-                return [];
-            }
-            
-            console.log(`Processing ${rooms.length} rooms and ${courses.length} courses...`);
-            
-            // Calculate hours per room
-            const roomHours = {};
-            
-            courses.forEach(course => {
-                if (course.kod_bilik) {
-                    const roomCode = course.kod_bilik;
-                    
-                    if (!roomHours[roomCode]) {
-                        // Find room details
-                        const room = rooms.find(r => r.kod_bilik === roomCode);
-                        roomHours[roomCode] = {
-                            roomCode: roomCode,
-                            roomName: room ? room.nama_bilik : roomCode,
-                            roomType: room ? room.jenis_bilik : 'Unknown',
-                            hours: 0,
-                            courseCount: 0
-                        };
-                    }
-                    
-                    // Each course = 3 hours per week (typical)
-                    roomHours[roomCode].hours += 3;
-                    roomHours[roomCode].courseCount += 1;
-                }
-            });
-            
-            // Convert to array and sort by hours
-            const result = Object.values(roomHours)
-                .sort((a, b) => b.hours - a.hours)
-                .slice(0, 15); // Top 15 rooms
-            
-            console.log(`✅ Calculated weekly hours for ${result.length} rooms`);
-            return result;
-            
-        } catch (error) {
-            console.error("ERROR calculating room weekly hours:", error);
-            return [];
-        }
     },
     
     // Get total students count - REAL CALCULATION from TTMS data
@@ -508,7 +617,6 @@ const TTMS = {
                 return 0;
             }
             
-            // Sum all students from all courses
             const total = courses.reduce((sum, course) => {
                 const students = parseInt(course.bil_pelajar) || 0;
                 return sum + students;
@@ -520,66 +628,6 @@ const TTMS = {
         } catch (error) {
             console.error("ERROR calculating total students:", error);
             return 0;
-        }
-    },
-    
-    // Get room usage heatmap data - REAL CALCULATION from TTMS data
-    async fetchRoomUsageHeatmap() {
-        try {
-            console.log('📊 Calculating room usage heatmap from REAL TTMS data...');
-            const courses = await this.fetchCourses();
-            
-            if (courses.length === 0) {
-                console.warn('⚠️ No courses data for heatmap');
-                return null;
-            }
-            
-            // Initialize heatmap data
-            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-            const timeSlots = ['8-9', '9-10', '10-11', '11-12', '14-15', '15-16', '16-17', '17-18'];
-            
-            const heatmap = {};
-            days.forEach(day => {
-                heatmap[day] = {};
-                timeSlots.forEach(slot => {
-                    heatmap[day][slot] = 0;
-                });
-            });
-            
-            const dayMap = {
-                'ISNIN': 'Monday', 'MONDAY': 'Monday',
-                'SELASA': 'Tuesday', 'TUESDAY': 'Tuesday',
-                'RABU': 'Wednesday', 'WEDNESDAY': 'Wednesday',
-                'KHAMIS': 'Thursday', 'THURSDAY': 'Thursday',
-                'JUMAAT': 'Friday', 'FRIDAY': 'Friday'
-            };
-            
-            // Count courses per day/time
-            courses.forEach(course => {
-                if (course.hari && course.masa) {
-                    const day = dayMap[course.hari.toUpperCase()];
-                    const hour = this.extractHourFromTime(course.masa);
-                    
-                    if (day && hour !== null) {
-                        // Find matching time slot
-                        const slot = timeSlots.find(s => {
-                            const [start] = s.split('-').map(n => parseInt(n));
-                            return hour === start;
-                        });
-                        
-                        if (slot && heatmap[day] && heatmap[day][slot] !== undefined) {
-                            heatmap[day][slot]++;
-                        }
-                    }
-                }
-            });
-            
-            console.log('✅ Room usage heatmap calculated');
-            return { days, timeSlots, data: heatmap };
-            
-        } catch (error) {
-            console.error("ERROR calculating heatmap:", error);
-            return null;
         }
     },
     
@@ -609,7 +657,6 @@ const TTMS = {
                     const course1 = currentCourses[i];
                     const course2 = currentCourses[j];
                     
-                    // Check if both courses have schedule info
                     if (course1.hari && course2.hari && 
                         course1.masa && course2.masa &&
                         course1.hari === course2.hari && 
@@ -657,11 +704,9 @@ const TTMS = {
         }
     },
     
-    // Lecturer clash detection (similar to student)
+    // Lecturer clash detection
     async detectLecturerClashes(lecturerId) {
         console.log(`🔍 Detecting clashes for lecturer: ${lecturerId}`);
-        // For now, use same logic as student
-        // In real implementation, would fetch lecturer's teaching schedule
         return this.detectStudentClashes(lecturerId);
     },
     
@@ -674,7 +719,6 @@ const TTMS = {
             const clashes = [];
             const summary = { total: 0, time: 0, room: 0, instructor: 0 };
             
-            // Check for room conflicts (same room, same time)
             for (let i = 0; i < courses.length; i++) {
                 for (let j = i + 1; j < courses.length; j++) {
                     const course1 = courses[i];
@@ -749,7 +793,6 @@ const TTMS = {
     extractHourFromTime(timeStr) {
         if (!timeStr) return null;
         
-        // Handle formats like "8:00 AM - 10:00 AM" or "08:00-10:00"
         const match = timeStr.match(/(\d{1,2}):/);
         return match ? parseInt(match[1]) : null;
     },
@@ -768,11 +811,54 @@ const TTMS = {
             }
         }
         return -1;
+    },
+    
+    getTimeSlotFromHour(hour) {
+        if (hour === null || hour === undefined) return 'Unknown';
+        
+        if (hour >= 8 && hour < 9) return '8-9 AM';
+        else if (hour >= 9 && hour < 10) return '9-10 AM';
+        else if (hour >= 10 && hour < 11) return '10-11 AM';
+        else if (hour >= 11 && hour < 12) return '11-12 PM';
+        else if (hour >= 12 && hour < 13) return '12-1 PM';
+        else if (hour >= 14 && hour < 15) return '2-3 PM';
+        else if (hour >= 15 && hour < 16) return '3-4 PM';
+        else if (hour >= 16 && hour < 17) return '4-5 PM';
+        else if (hour >= 17 && hour < 18) return '5-6 PM';
+        else if (hour >= 18 && hour < 19) return '6-7 PM';
+        else if (hour >= 19 && hour < 20) return '7-8 PM';
+        else return `${hour}-${hour+1}`;
+    },
+    
+    calculateWeeklyHours(schedule) {
+        if (!schedule || schedule.length === 0) return 0;
+        
+        const hoursPerSession = 2;
+        return schedule.length * hoursPerSession;
+    },
+    
+    calculateHoursByDay(schedule) {
+        const dayMap = {
+            1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'
+        };
+        
+        const hoursByDay = {
+            Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0
+        };
+        
+        schedule.forEach(item => {
+            if (item.hari && dayMap[item.hari]) {
+                const day = dayMap[item.hari];
+                hoursByDay[day] += 2;
+            }
+        });
+        
+        return hoursByDay;
     }
 };
 
 // Make TTMS globally available
 if (typeof window !== 'undefined') {
     window.TTMS = TTMS;
-    console.log('✅ TTMS Model loaded with analytics support');
+    console.log('✅ TTMS Model loaded with room analytics support');
 }

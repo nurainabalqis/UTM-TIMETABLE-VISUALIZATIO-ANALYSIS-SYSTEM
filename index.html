@@ -161,6 +161,31 @@
         .status-inactive { color: #9E9E9E; }
         .status-warning { color: #FF9800; }
         
+        /* Chart specific styles */
+        .chart-tooltip {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            min-width: 150px;
+        }
+        
+        .bg-pink { background-color: #FF69B4 !important; color: white; }
+        .bg-blue { background-color: #457E96 !important; color: white; }
+        
+        .room-type-badge {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        /* Progress bars in table */
+        .progress {
+            min-width: 100px;
+        }
+        
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .sidebar {
@@ -822,188 +847,202 @@
                 },
                 
                 async loadRoomUtilization() {
-                    const response = await fetch('views/utilization.html');
-                    const template = await response.text();
+                    const user = JSON.parse(localStorage.getItem('user'));
                     
-                    this.components.utilization = {
-                        template,
-                        data() {
-                            return {
-                                rooms: [],
-                                utilizationData: [],
-                                filterBuilding: 'all',
-                                isLoading: true,
-                                stats: {
-                                    totalRooms: 0,
-                                    lectureHalls: 0,
-                                    labs: 0,
-                                    tutorialRooms: 0,
-                                    averageUtilization: 0
-                                },
-                                // Student-specific data
-                                myRoomData: [],
-                                searchDay: '',
-                                searchTime: ''
-                            };
-                        },
-                        async mounted() {
-                            await this.loadRoomData();
-                            
-                            // Load student-specific data if student
-                            const user = JSON.parse(localStorage.getItem('user'));
-                            if (user.role === 'student') {
-                                await this.loadStudentRoomData(user.username);
-                            }
-                        },
-                        methods: {
-                            async loadRoomData() {
-                                this.isLoading = true;
-                                try {
-                                    // Use DERIVED utilization stats only
-                                    const utilization = await TTMS.fetchRoomUtilizationStats();
-                                    this.utilizationData = utilization;
-
-                                    this.stats.totalRooms = utilization.reduce((sum, r) => sum + r.count, 0);
-                                    this.stats.averageUtilization = utilization.length
-                                        ? Math.round(
-                                            utilization.reduce((s, r) => s + r.utilization, 0) / utilization.length
-                                        )
-                                        : 0;
-
-                                    // Optional breakdown
-                                    this.stats.lectureHalls = utilization
-                                        .filter(r => r.type.toLowerCase().includes('dewan'))
-                                        .reduce((s, r) => s + r.count, 0);
-
-                                    this.stats.labs = utilization
-                                        .filter(r => r.type.toLowerCase().includes('lab'))
-                                        .reduce((s, r) => s + r.count, 0);
-
-                                    this.drawUtilizationChart();
-
-                                } catch (error) {
-                                    console.error('Error loading room utilization:', error);
-                                    this.$parent.showAlert('Failed to load room utilization data', 'danger');
-                                } finally {
-                                    this.isLoading = false;
-                                }
-                            },
-                            
-                            // New method for student room data
-                            async loadStudentRoomData(studentId) {
-                                try {
-                                    const courses = await TTMS.fetchMyCourses(studentId);
-                                    const currentSession = JSON.parse(localStorage.getItem('currentSession'));
-                                    
-                                    this.myRoomData = courses
-                                        .filter(course => 
-                                            course.sesi === currentSession.sesi && 
-                                            course.semester.toString() === currentSession.semester &&
-                                            course.kod_bilik
-                                        )
-                                        .map(course => ({
-                                            courseCode: course.kod_subjek,
-                                            courseName: course.nama_subjek,
-                                            roomCode: course.kod_bilik,
-                                            day: course.hari || 'N/A',
-                                            time: course.masa || 'N/A',
-                                            building: this.getBuildingFromRoomCode(course.kod_bilik),
-                                            capacity: course.bil_pelajar || 'N/A'
-                                        }));
-                                        
-                                    this.$parent.showAlert(`Found ${this.myRoomData.length} rooms for your courses`, 'success');
-                                } catch (error) {
-                                    console.error('Error loading student room data:', error);
-                                }
-                            },
-                            
-                            getBuildingFromRoomCode(roomCode) {
-                                if (!roomCode) return 'Unknown';
-                                // Simple mapping - you can expand this
-                                if (roomCode.startsWith('FK')) return 'Faculty of Computing';
-                                if (roomCode.startsWith('FKE')) return 'Faculty of Electrical';
-                                if (roomCode.startsWith('FKM')) return 'Faculty of Mechanical';
-                                if (roomCode.startsWith('DK')) return 'Lecture Hall';
-                                return 'Main Building';
-                            },
-                            
-                            drawUtilizationChart() {
-                                google.charts.load('current', { packages: ['corechart'] });
-                                google.charts.setOnLoadCallback(() => {
-                                    const user = JSON.parse(localStorage.getItem('user'));
-                                    
-                                    if (user.role === 'student') {
-                                        // Student version - show peak hours
-                                        this.drawPeakHoursChart();
-                                    } else {
-                                        // Admin/Lecturer version - show utilization
-                                        this.drawUtilizationPieChart();
-                                    }
-                                });
-                            },
-                            
-                            drawUtilizationPieChart() {
-                                const data = new google.visualization.DataTable();
-                                data.addColumn('string', 'Room Type');
-                                data.addColumn('number', 'Utilization %');
-                                
-                                this.utilizationData.forEach(item => {
-                                    data.addRow([item.type, item.utilization || 0]);
-                                });
-                                
-                                const options = {
-                                    title: 'Room Utilization by Type',
-                                    pieHole: 0.4,
-                                    colors: ['#1976D2', '#2196F3', '#64B5F6', '#90CAF9'],
-                                    backgroundColor: 'transparent',
-                                    chartArea: { width: '90%', height: '80%' }
+                    if (user.role === 'student') {
+                        // Load student version
+                        const response = await fetch('views/utilization-student.html');
+                        const template = await response.text();
+                        
+                        this.components.utilization = {
+                            template,
+                            data() {
+                                return {
+                                    myRoomData: [],
+                                    searchTime: '',
+                                    searchType: '',
+                                    isLoading: true
                                 };
-                                
-                                const chart = new google.visualization.PieChart(
-                                    document.getElementById('roomUtilizationChart')
-                                );
-                                chart.draw(data, options);
                             },
-                            
-                            drawPeakHoursChart() {
-                                // Load peak hours data for students
-                                TTMS.fetchPeakHoursData().then(peakData => {
-                                    const data = new google.visualization.DataTable();
-                                    data.addColumn('string', 'Time Slot');
-                                    data.addColumn('number', 'Activity Level');
-                                    
-                                    peakData.forEach(item => {
-                                        data.addRow([item.slot, item.count]);
-                                    });
-                                    
-                                    const options = {
-                                        title: 'Building Activity - Peak Hours',
-                                        colors: ['#4CAF50'],
-                                        backgroundColor: 'transparent',
-                                        hAxis: { title: 'Time of Day' },
-                                        vAxis: { title: 'Activity Level', minValue: 0 },
-                                        chartArea: { width: '85%', height: '70%' }
-                                    };
-                                    
-                                    const chart = new google.visualization.LineChart(
-                                        document.getElementById('peakHoursChart')
+                            async mounted() {
+                                await this.loadStudentData();
+                                // Initialize charts if RoomController exists
+                                if (window.RoomController) {
+                                    try {
+                                        await RoomController.drawRoomUtilizationDashboard();
+                                    } catch (error) {
+                                        console.error('Error drawing charts:', error);
+                                    }
+                                }
+                            },
+                            methods: {
+                                async loadStudentData() {
+                                    this.isLoading = true;
+                                    try {
+                                        const user = JSON.parse(localStorage.getItem('user'));
+                                        const courses = await TTMS.fetchMyCourses(user.username);
+                                        const currentSession = TTMS.getCurrentSession();
+                                        
+                                        this.myRoomData = courses
+                                            .filter(course => 
+                                                course.sesi === currentSession.sesi && 
+                                                course.semester.toString() === currentSession.semester &&
+                                                course.kod_bilik
+                                            )
+                                            .map(course => ({
+                                                courseCode: course.kod_subjek,
+                                                courseName: course.nama_subjek,
+                                                roomCode: course.kod_bilik,
+                                                day: course.hari || 'N/A',
+                                                time: course.masa || 'N/A',
+                                                building: this.getBuildingFromRoomCode(course.kod_bilik),
+                                                capacity: course.bil_pelajar || 'N/A'
+                                            }));
+                                            
+                                        this.$parent.showAlert(`Found ${this.myRoomData.length} rooms for your courses`, 'success');
+                                    } catch (error) {
+                                        console.error('Error loading student room data:', error);
+                                        this.$parent.showAlert('Failed to load room data', 'danger');
+                                    } finally {
+                                        this.isLoading = false;
+                                    }
+                                },
+                                getBuildingFromRoomCode(roomCode) {
+                                    if (!roomCode) return 'Unknown';
+                                    if (roomCode.startsWith('FK')) return 'Faculty of Computing';
+                                    if (roomCode.startsWith('FKE')) return 'Faculty of Electrical';
+                                    if (roomCode.startsWith('FKM')) return 'Faculty of Mechanical';
+                                    if (roomCode.startsWith('DK')) return 'Lecture Hall';
+                                    return 'Main Building';
+                                },
+                                searchAvailableRooms() {
+                                    this.$parent.showAlert(
+                                        `Searching for ${this.searchType || 'any type'} rooms during ${this.searchTime || 'any time'}`, 
+                                        'info'
                                     );
-                                    chart.draw(data, options);
-                                });
-                            },
-                            
-                            applyFilter() {
-                                this.loadRoomData();
-                                this.$parent.showAlert(`Filter applied: ${this.filterBuilding}`, 'info');
-                            },
-                            
-                            searchRooms() {
-                                // Simple search functionality for students
-                                this.$parent.showAlert(`Searching for rooms on ${this.searchDay || 'any day'} during ${this.searchTime || 'any time'}`, 'info');
+                                }
                             }
-                        }
-                    };
+                        };
+                    } else {
+                        // Load advanced version for lecturers/admin
+                        const response = await fetch('views/utilization-advanced.html');
+                        const template = await response.text();
+                        
+                        this.components.utilization = {
+                            template,
+                            data() {
+                                return {
+                                    stats: {
+                                        totalRooms: 0,
+                                        avgUtilization: 0,
+                                        peakHours: 0,
+                                        lowUsage: 0
+                                    },
+                                    topRooms: [],
+                                    chartFilter: 'capacity',
+                                    isLoading: true
+                                };
+                            },
+                            async mounted() {
+                                await this.loadRoomAnalysis();
+                                // Initialize advanced charts
+                                if (window.RoomController) {
+                                    try {
+                                        await RoomController.drawRoomUtilizationDashboard();
+                                    } catch (error) {
+                                        console.error('Error drawing advanced charts:', error);
+                                    }
+                                }
+                            },
+                            methods: {
+                                async loadRoomAnalysis() {
+                                    this.isLoading = true;
+                                    try {
+                                        const analysis = await TTMS.fetchRoomUtilizationAnalysis();
+                                        if (analysis.analysis) {
+                                            // Update stats
+                                            this.stats.totalRooms = analysis.totalRooms || 0;
+                                            this.stats.avgUtilization = this.calculateAvgUtilization(analysis.analysis);
+                                            this.stats.lowUsage = analysis.analysis.byUsage?.low || 0;
+                                            
+                                            // Update top rooms
+                                            this.topRooms = analysis.analysis.detailedRooms?.slice(0, 20) || [];
+                                        }
+                                    } catch (error) {
+                                        console.error('Error loading room analysis:', error);
+                                        this.$parent.showAlert('Failed to load room analysis data', 'danger');
+                                    } finally {
+                                        this.isLoading = false;
+                                    }
+                                },
+                                calculateAvgUtilization(analysis) {
+                                    if (!analysis.detailedRooms) return 0;
+                                    // For now, calculate based on room types
+                                    const totalRooms = analysis.detailedRooms.length;
+                                    const lectureHalls = analysis.detailedRooms.filter(r => r.type === 'Lecture Hall').length;
+                                    return lectureHalls > 0 ? Math.round((lectureHalls / totalRooms) * 100) : 0;
+                                },
+                                findPeakHours(peakHoursData) {
+                                    if (!peakHoursData || peakHoursData.length === 0) return 0;
+                                    const max = Math.max(...peakHoursData.map(p => p.count));
+                                    return max;
+                                },
+                                updateChart() {
+                                    if (window.RoomController) {
+                                        // This would refresh charts with new filter
+                                        RoomController.drawTopRoomsChart(this.topRooms);
+                                    }
+                                },
+                                getTypeBadge(type) {
+                                    const badges = {
+                                        'Lecture Hall': 'bg-danger',
+                                        'Classroom': 'bg-primary',
+                                        'Laboratory': 'bg-warning',
+                                        'Office': 'bg-secondary',
+                                        'Student Lounge': 'bg-info'
+                                    };
+                                    return badges[type] || 'bg-dark';
+                                },
+                                getUtilizationBadge(hours) {
+                                    if (hours > 20) return 'bg-success';
+                                    if (hours > 10) return 'bg-warning';
+                                    return 'bg-secondary';
+                                },
+                                getUtilizationLevel(hours) {
+                                    if (hours > 20) return 'High';
+                                    if (hours > 10) return 'Medium';
+                                    if (hours > 0) return 'Low';
+                                    return 'Unused';
+                                },
+                                viewRoomSchedule(roomCode) {
+                                    if (window.RoomController) {
+                                        RoomController.viewRoomDetails(roomCode);
+                                    } else {
+                                        this.$parent.showAlert('Room details feature not available', 'info');
+                                    }
+                                },
+                                exportChartData() {
+                                    // Export functionality
+                                    const csvContent = "data:text/csv;charset=utf-8," 
+                                        + "Room Code,Name,Type,Capacity,Usage Hours,Subjects\n"
+                                        + this.topRooms.map(r => 
+                                            `${r.code},${r.name},${r.type},${r.capacity},${r.usageHours},${r.subjectCount}`
+                                        ).join("\n");
+                                    
+                                    const link = document.createElement("a");
+                                    link.setAttribute("href", encodeURI(csvContent));
+                                    link.setAttribute("download", "room_analysis.csv");
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    
+                                    this.$parent.showAlert('Room analysis data exported', 'success');
+                                }
+                            }
+                        };
+                    }
                 },
+                
                 showAlert(message, type = 'info') {
                     const alert = { message, type, id: Date.now() };
                     this.alerts.push(alert);
