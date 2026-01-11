@@ -24,16 +24,15 @@ const RoomController = {
                 console.warn('No room analysis data available');
                 return;
             }
-            
-            // Draw all charts
+
             await Promise.all([
                 this.drawRoomTypeChart(analysis.charts.roomTypeDistribution),
                 this.drawUsageLevelChart(analysis.charts.usageLevelDistribution),
                 this.drawTopRoomsChart(analysis.charts.topRoomsByUsage),
-                this.drawPeakHoursChart(analysis.charts.peakHoursData),
-                this.drawCapacityChart(analysis.charts.capacityDistribution)
+                this.drawCapacityChart(analysis.charts.capacityDistribution),
+                this.drawPeakHoursChart(analysis.charts.peakHoursData)
             ]);
-            
+        
             console.log('✅ Room utilization dashboard drawn');
             
         } catch (error) {
@@ -212,7 +211,6 @@ const RoomController = {
                         RoomController.viewRoomDetails(roomCode);
                     }
                 });
-                
                 resolve();
             });
         });

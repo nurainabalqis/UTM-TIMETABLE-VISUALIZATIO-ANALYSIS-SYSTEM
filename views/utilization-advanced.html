@@ -1,191 +1,152 @@
 <div>
+
     <!-- Page Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="text-dark mb-1">
-                <i class="fas fa-door-open text-success me-2"></i>Room Utilization
+                <i class="fas fa-door-open text-success me-2"></i>
+                Room Utilization (Lecturer / Admin)
             </h2>
             <p class="text-muted mb-0">
-                Analyze room usage patterns and efficiency
+                Analyze room usage patterns and efficiency based on TTMS data
             </p>
         </div>
         <div class="badge bg-success fs-6">
-            <i class="fas fa-calendar me-1"></i> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+            <i class="fas fa-calendar me-1"></i>
+            Current Session
         </div>
     </div>
-    
-    <!-- Filter Section -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <div class="row g-3 align-items-center">
-                <div class="col-md-4">
-                    <label class="form-label">Building</label>
-                    <select class="form-select" v-model="filterBuilding" @change="applyFilter">
-                        <option value="all">All Buildings</option>
-                        <option value="FK">Faculty of Computing (FK)</option>
-                        <option value="FKE">Faculty of Electrical (FKE)</option>
-                        <option value="FKM">Faculty of Mechanical (FKM)</option>
-                        <option value="FSSH">Faculty of Social Sciences</option>
-                    </select>
-                </div>
-                <div class="col-md-8 d-flex align-items-end">
-                    <button class="btn btn-utm w-100" @click="loadRoomData">
-                        <i class="fas fa-sync-alt me-2"></i>Refresh Data
-                    </button>
-                </div>
-            </div>
-        </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle me-2"></i>
+        This analysis is generated using <strong>real TTMS scheduling data</strong>.
+        Charts may take a few seconds to load.
     </div>
-    
+
+    <!-- Charts Row 1 -->
     <div class="row">
-        <!-- Statistics -->
-        <div class="col-md-4 mb-4">
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Quick Stats</h5>
+
+        <!-- Room Type Distribution -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-pie me-2"></i>
+                        Room Types Distribution
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <div v-if="isLoading" class="text-center py-3">
-                        <div class="spinner-border spinner-border-sm text-info"></div>
-                        <p class="mt-2 small text-muted">Loading statistics...</p>
-                    </div>
-                    <div v-else class="list-group list-group-flush">
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>Total Rooms</span>
-                            <span class="badge bg-primary">{{ stats.totalRooms }}</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>Lecture Halls</span>
-                            <span class="badge bg-success">{{ stats.lectureHalls }}</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>Laboratories</span>
-                            <span class="badge bg-warning">{{ stats.labs }}</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>Tutorial Rooms</span>
-                            <span class="badge bg-info">{{ stats.tutorialRooms }}</span>
-                        </div>
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>Average Utilization</span>
-                            <span class="badge" :class="{'bg-danger': stats.averageUtilization > 80,
-                                                         'bg-warning': stats.averageUtilization > 60,
-                                                         'bg-success': stats.averageUtilization <= 60}">
-                                {{ stats.averageUtilization }}%
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Weekly Hours -->
-            <div class="card mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Weekly Hours</h5>
-                </div>
-                <div class="card-body">
-                    <div class="text-center">
-                        <h2 class="text-success">40</h2>
-                        <p class="text-muted mb-0">Average hours per week</p>
-                        <div class="progress mt-3">
-                            <div class="progress-bar bg-success" style="width: 65%"></div>
-                        </div>
-                        <small class="text-muted">65% of capacity</small>
-                    </div>
+                    <div id="roomTypeChart" style="height: 320px;"></div>
                 </div>
             </div>
         </div>
-        
-        <!-- Chart -->
-        <div class="col-md-8 mb-4">
+
+        <!-- Capacity Distribution -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-users me-2"></i>
+                        Room Capacity Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="capacityChart" style="height: 320px;"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Charts Row 2 -->
+    <div class="row">
+
+        <!-- Utilization Levels -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>
+                        Room Utilization Levels
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="usageLevelChart" style="height: 320px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peak Hours -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clock me-2"></i>
+                        Peak Room Usage Hours
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="peakHoursChart" style="height: 320px;"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Top Rooms -->
+    <div class="row">
+        <div class="col-md-12 mb-4">
             <div class="card">
                 <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Room Utilization Analysis</h5>
+                    <h5 class="mb-0">
+                        <i class="fas fa-building me-2"></i>
+                        Top Rooms by Weekly Usage
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <div v-if="isLoading" class="text-center py-4">
-                        <div class="loading mb-3"></div>
-                        <p class="text-muted">Loading room data from TTMS...</p>
-                    </div>
-                    <div v-else id="roomUtilizationChart" style="height: 400px;">
-                        <!-- Chart will be rendered here -->
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Room List -->
-            <div class="card mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-list me-2"></i>Room Details</h5>
-                </div>
-                <div class="card-body">
-                    <div v-if="rooms.length === 0" class="text-center py-3">
-                        <p class="text-muted">No room data available</p>
-                    </div>
-                    <div v-else class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Room Code</th>
-                                    <th>Type</th>
-                                    <th>Capacity</th>
-                                    <th>Building</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="(room, index) in rooms.slice(0, 10)" :key="index">
-                                    <td><code>{{ room.kod_bilik }}</code></td>
-                                    <td>{{ room.jenis_bilik || 'N/A' }}</td>
-                                    <td>{{ room.kapasiti || 'N/A' }}</td>
-                                    <td>{{ room.blok || 'N/A' }}</td>
-                                    <td>
-                                        <span class="badge bg-success">Available</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <div id="topRoomsChart" style="height: 520px;"></div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <!-- Analysis Summary -->
+
+    <!-- Summary -->
     <div class="card mt-4">
         <div class="card-header bg-light">
-            <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Utilization Analysis</h5>
+            <h5 class="mb-0">
+                <i class="fas fa-chart-line me-2"></i>
+                Utilization Summary
+            </h5>
         </div>
         <div class="card-body">
             <div class="row">
                 <div class="col-md-6">
-                    <h6>Key Metrics</h6>
                     <ul class="list-group list-group-flush">
                         <li class="list-group-item d-flex justify-content-between">
-                            <span>Peak Usage Time</span>
-                            <span class="text-success">10 AM - 12 PM</span>
+                            <span>Data Source</span>
+                            <span class="text-success">TTMS Live</span>
                         </li>
                         <li class="list-group-item d-flex justify-content-between">
-                            <span>Most Utilized Room Type</span>
-                            <span class="text-success">Lecture Halls</span>
+                            <span>Analysis Scope</span>
+                            <span class="text-success">All Faculties</span>
                         </li>
                         <li class="list-group-item d-flex justify-content-between">
-                            <span>Optimal Usage Rate</span>
-                            <span class="text-success">60-70%</span>
+                            <span>Most Utilized Period</span>
+                            <span class="text-success">10:00 AM – 12:00 PM</span>
                         </li>
                     </ul>
                 </div>
                 <div class="col-md-6">
-                    <h6>Recommendations</h6>
-                    <div class="alert alert-info">
-                        <p class="mb-0 small">
-                            <i class="fas fa-lightbulb me-2"></i>
-                            Consider redistributing classes to underutilized rooms during peak hours
-                            to optimize space usage.
-                        </p>
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-lightbulb me-2"></i>
+                        Consider redistributing classes from highly utilized rooms
+                        to improve overall campus space efficiency.
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
 </div>
+

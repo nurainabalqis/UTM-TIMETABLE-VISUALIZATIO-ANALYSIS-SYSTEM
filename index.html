@@ -945,14 +945,12 @@
                             },
                             async mounted() {
                                 await this.loadRoomAnalysis();
-                                // Initialize advanced charts
-                                if (window.RoomController) {
-                                    try {
-                                        await RoomController.drawRoomUtilizationDashboard();
-                                    } catch (error) {
-                                        console.error('Error drawing advanced charts:', error);
+                                
+                                this.$nextTick(() => {
+                                    if (window.RoomController) {
+                                        RoomController.drawRoomUtilizationDashboard();
                                     }
-                                }
+                                });
                             },
                             methods: {
                                 async loadRoomAnalysis() {
