@@ -278,6 +278,11 @@
                         <a class="nav-link" :class="{ active: currentView === 'utilization' }" href="#" @click.prevent="loadView('utilization')">
                             <i class="fas fa-door-open"></i> Room Utilization
                         </a>
+
+                    <!-- Student Count Statistics (Available for all) -->
+                        <a class="nav-link" :class="{ active: currentView === 'studentStats' }" href="#" @click.prevent="loadView('studentStats')">
+                            <i class="fas fa-door-open"></i> Student Count Statistics
+                        </a>
                     </nav>
                     
                     <!-- Current Session Info -->
@@ -319,8 +324,11 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- Application Scripts -->
+    <!-- Core Services (globals) -->
+    <script src="services/sessionService.js"></script>
+     <!-- Data / Model layer -->
     <script src="models/ttmsModel.js"></script>
-    
+
     <!-- Controller Scripts -->
     <script src="controllers/authController.js"></script>
     <script src="controllers/dashboardController.js"></script>
@@ -329,10 +337,12 @@
     <script src="controllers/analysisController.js"></script>
     <script src="controllers/studentController.js"></script>
     <script src="controllers/roomController.js"></script>
+    <script src="controllers/studentCountController.js"></script>
     
     <script>
         const { createApp } = Vue;
-        
+        console.log('TTMS exists?', window.TTMS);
+
         const app = createApp({
             data() {
                 return {
@@ -352,7 +362,8 @@
                         courses: null,
                         sessions: null,
                         clash: null,
-                        utilization: null
+                        utilization: null,
+                        studentStats: null
                     }
                 };
             },
@@ -398,6 +409,9 @@
                                 break;
                             case 'utilization':
                                 await this.loadRoomUtilization();
+                                break;
+                            case 'studentStats':
+                                await this.loadStudentStatistics();
                                 break;
                         }
                     } catch (error) {
@@ -1042,6 +1056,65 @@
                         };
                     }
                 },
+
+                // load student count
+                async loadStudentStatistics() {
+                    
+                    const response = await fetch('views/student-statistics.html');
+                    const template = await response.text();
+                    const { markRaw } = Vue;
+
+                    this.components.studentStats = markRaw({
+                        template,
+                        data() {
+                            return {
+                                stats: null,
+                                isLoading: true
+                            };
+                        },
+                        async mounted() {
+                            await this.loadStudentData();
+
+                            // Draw charts once data is loaded
+                            if (window.StudentCountController && this.stats) {
+                                try {
+                                    await StudentCountController.drawCharts(this.stats);
+                                } catch (error) {
+                                    console.error('Error drawing student charts:', error);
+                                }
+                            }
+
+                        },
+                        methods: {
+                            async loadStudentData() {
+                                this.isLoading = true;
+                                try {
+                                    const sesi = TTMS.getCurrentSession().sesi;
+                                    const semester = TTMS.getCurrentSession().semester;
+
+                                    const stats = await TTMS.fetchStudentStatistics({ sesi, semester });
+                                    if (!stats) {
+                                        this.$parent.showAlert('Failed to load student statistics', 'danger');
+                                        return;
+                                    }
+
+                                    this.stats = stats;
+
+                                    this.$parent.showAlert(
+                                        `Loaded ${stats.total} students across ${Object.keys(stats.byMajor).length} majors`, 
+                                        'success'
+                                    );
+                                } catch (error) {
+                                    console.error('Error fetching student stats:', error);
+                                    this.$parent.showAlert('Failed to load student statistics', 'danger');
+                                } finally {
+                                    this.isLoading = false;
+                                }
+                            }
+                        }
+                    });
+                },
+
                 
                 showAlert(message, type = 'info') {
                     const alert = { message, type, id: Date.now() };

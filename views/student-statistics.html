@@ -1,0 +1,140 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-user-graduate text-primary me-2"></i>Student Count Analysis
+            </h2>
+            <p class="text-muted mb-0">
+                View the distribution of students across majors and years of study
+            </p>
+        </div>
+        <div class="badge bg-primary fs-6">
+            <i class="fas fa-calendar me-1"></i> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+        </div>
+    </div>
+
+    <!-- Total Students Card -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Total Students</h5>
+                    <h2 class="text-primary">{{ stats?.total || 0 }}</h2>
+                    <p class="text-muted mb-0">Across all majors and years</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Most Popular Major</h5>
+                    <h4 class="text-success">
+                        {{ stats ? Object.entries(stats.majorPercentages).sort((a,b)=>b[1].count - a[1].count)[0][0] : 'N/A' }}
+                    </h4>
+                    <p class="text-muted mb-0">Major with the highest student count</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title">Largest Year Group</h5>
+                    <h4 class="text-success">
+                        {{ stats ? Object.entries(stats.byYear).sort((a,b)=>b[1]-a[1])[0][0] : 'N/A' }}
+                    </h4>
+                    <p class="text-muted mb-0">Year with the most students</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Major Distribution Pie Chart -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Student Distribution by Major</h5>
+                </div>
+                <div class="card-body">
+                    <div id="majorMajorityChart" style="height: 350px;"></div>
+                    <div class="alert alert-info mt-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Shows the percentage of students in each major. Majority and minority majors are highlighted.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Year Distribution Pie Chart -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Student Distribution by Year</h5>
+                </div>
+                <div class="card-body">
+                    <div id="yearMajorityChart" style="height: 350px;"></div>
+                    <div class="alert alert-info mt-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Shows the number of students in each year of study.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Optional Detailed Tables -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-users me-2"></i>By Major (Counts & Percentages)</h5>
+                </div>
+                <div class="card-body table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Major</th>
+                                <th>Count</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(data, major) in stats?.majorPercentages" :key="major">
+                                <td>{{ major }}</td>
+                                <td>{{ data.count }}</td>
+                                <td>{{ data.percent.toFixed(1) }}%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-users me-2"></i>By Year</h5>
+                </div>
+                <div class="card-body table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Year</th>
+                                <th>Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(count, year) in stats?.byYear" :key="year">
+                                <td>{{ year }}</td>
+                                <td>{{ count }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

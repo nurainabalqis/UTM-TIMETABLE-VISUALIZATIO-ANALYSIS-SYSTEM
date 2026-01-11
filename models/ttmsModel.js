@@ -854,11 +854,187 @@ const TTMS = {
         });
         
         return hoursByDay;
+    },
+
+    // =============== FETCH ALL STUDENTS DATA =========================
+    
+    async fetchAllStudents({
+    session_id,
+    sesi = "2025/2026",
+    semester = 1,
+    limit = 100
+        }) {
+
+    // DEFINING THE CATEGORY
+
+    const MAJORS = ["SECJH", "SECBH", "SECPH", "SECRH", "SECVH", "SCSEH"];
+    const YEARS = [1, 2, 3, 4];
+
+    let offset = 0;
+    let allStudents = [];
+
+    while (true) {
+        const url =
+            `${this.BASE_URL}?entity=pelajar` +
+            `&session_id=${session_id}` +
+            `&sesi=${sesi}` +
+            `&semester=${semester}` +
+            `&limit=${limit}` +
+            `&offset=${offset}`;
+
+        console.log("TTMS Students URL:", url);
+
+        const response = await fetch(url);
+        const text = await response.text();
+        const data = this.parseTTMSResponse(text, "Students");
+
+        if (!data || data.length === 0) break;
+
+        allStudents.push(...data);
+        offset += limit;
     }
+
+    console.log(`✅ Total students fetched: ${allStudents.length}`);
+    return allStudents;
+},
+
+    // RELATE TO STUDENTS
+    aggregateStudentStats(students) {
+        const stats = {
+            total: 0,
+            byMajor: {},
+            byYear: {},
+            byMajorAndYear: {}
+        };
+
+        // initialize
+        MAJORS.forEach(m => {
+            stats.byMajor[m] = 0;
+            stats.byMajorAndYear[m] = {};
+            YEARS.forEach(y => {
+                stats.byMajorAndYear[m][y] = 0;
+            });
+        });
+
+        YEARS.forEach(y => stats.byYear[y] = 0);
+
+        for (const s of students) {
+            const major = s.kod_kursus;
+            const year = Number(s.tahun_kursus);
+
+            if (!MAJORS.includes(major)) continue;
+            if (!YEARS.includes(year)) continue;
+
+            stats.total++;
+            stats.byMajor[major]++;
+            stats.byYear[year]++;
+            stats.byMajorAndYear[major][year]++;
+        }
+
+        return stats;
+
+    },
+    // CALCULATE PERCENTAGE
+    calculatePercentages(stats) {
+        const percentages = {};
+
+        for (const major in stats.byMajor) {
+            percentages[major] = {
+                count: stats.byMajor[major],
+                percent: ((stats.byMajor[major] / stats.total) * 100).toFixed(2)
+            };
+        }
+
+        return percentages;
+    },
+
 };
+
+TTMS.fetchStudentStatistics = async function({ sesi, semester }) {
+        try {
+            
+            const session_id = getEffectiveSession();
+            if (!session_id) throw new Error("No effective session available");
+
+            const limit = 500;   // adjust based on TTMS max per call
+            let offset = 0;
+            let allStudents = [];
+
+            while (true) {
+                const url = `${this.BASE_URL}?entity=pelajar&session_id=${session_id}&sesi=${sesi}&semester=${semester}&limit=${limit}&offset=${offset}`;
+                console.log("Fetching students:", url);
+
+                const response = await fetch(url);
+                const text = await response.text();
+                const data = this.parseTTMSResponse(text, 'StudentList');
+
+                if (!data || data.length === 0) break;
+
+                allStudents = allStudents.concat(data);
+                if (data.length < limit) break;  // last page
+
+                offset += limit;
+            }
+
+            // Initialize aggregation
+            const majors = ["SECJH", "SECBH", "SECPH", "SECRH", "SECVH", "SCSEH"];
+            const years = [1, 2, 3, 4];
+
+            const byMajor = {};
+            const byYear = {};
+            const byMajorAndYear = {};
+
+            // Initialize structures
+            majors.forEach(m => byMajor[m] = 0);
+            years.forEach(y => byYear[y] = 0);
+            majors.forEach(m => {
+                byMajorAndYear[m] = {};
+                years.forEach(y => byMajorAndYear[m][y] = 0);
+            });
+
+            // Aggregate counts
+            allStudents.forEach(student => {
+                const major = student.kod_kursus;
+                const year = Number(student.tahun_kursus);
+
+                if (majors.includes(major)) byMajor[major]++;
+                if (years.includes(year)) byYear[year]++;
+                if (majors.includes(major) && years.includes(year)) byMajorAndYear[major][year]++;
+            });
+
+            // Total students
+            const total = allStudents.length;
+
+            // Calculate percentages for each major
+            const majorPercentages = {};
+            Object.entries(byMajor).forEach(([major, count]) => {
+                majorPercentages[major] = {
+                    count,
+                    percent: total ? ((count / total) * 100).toFixed(2) : 0
+                };
+            });
+
+            return {
+                total,
+                byMajor,
+                byYear,
+                byMajorAndYear,
+                majorPercentages
+            };
+
+        } catch (error) {
+            console.error("Error fetching student statistics:", error);
+            return null;
+        }
+    };
+
+console.log("getEffectiveSession:", typeof window.getEffectiveSession);
 
 // Make TTMS globally available
 if (typeof window !== 'undefined') {
     window.TTMS = TTMS;
     console.log('✅ TTMS Model loaded with room analytics support');
 }
+await TTMS.fetchStudentStatistics({ sesi, semester });
+console.log("fetchStudentStatistics CALLED");
+

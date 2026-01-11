@@ -8,7 +8,8 @@ const AccessController = {
             courses: ['view'],
             sessions: ['view'],
             clash: ['view', 'detect'],
-            utilization: ['view']  // Students can view but not manage
+            utilization: ['view'], // Students can view but not manage
+            studentcount: ['view']
         },
         lecturer: {
             dashboard: ['view'],
@@ -16,7 +17,8 @@ const AccessController = {
             courses: ['view', 'manage_own'],
             sessions: ['view', 'manage_own'],
             clash: ['view', 'detect', 'resolve_own'],
-            utilization: ['view', 'analyze']
+            utilization: ['view', 'analyze'],
+            studentcount: ['view']
         },
         admin: {
             dashboard: ['view', 'manage'],
