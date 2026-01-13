@@ -242,6 +242,9 @@
                             <a class="nav-link" :class="{ active: currentView === 'mycourses' }" href="#" @click.prevent="loadView('mycourses')">
                                 <i class="fas fa-graduation-cap"></i> My Courses
                             </a>
+                            <a class="nav-link" :class="{ active: currentView === 'timetable' }" href="#" @click.prevent="loadView('timetable')">
+                                <i class="fas fa-calendar-alt"></i> My Timetable
+                            </a>
                             <a class="nav-link" :class="{ active: currentView === 'courses' }" href="#" @click.prevent="loadView('courses')">
                                 <i class="fas fa-list"></i> Course List
                             </a>
@@ -249,11 +252,14 @@
                                 <i class="fas fa-calendar"></i> Session View
                             </a>
                         </template>
-                        
+
                         <!-- Lecturer Menu -->
                         <template v-if="user.role === 'lecturer'">
+                            <a class="nav-link" :class="{ active: currentView === 'timetable' }" href="#" @click.prevent="loadView('timetable')">
+                                <i class="fas fa-calendar-alt"></i> Teaching Schedule
+                            </a>
                             <a class="nav-link" :class="{ active: currentView === 'courses' }" href="#" @click.prevent="loadView('courses')">
-                                <i class="fas fa-chalkboard-teacher"></i> Teaching Schedule
+                                <i class="fas fa-chalkboard-teacher"></i> Course List
                             </a>
                             <a class="nav-link" :class="{ active: currentView === 'sessions' }" href="#" @click.prevent="loadView('sessions')">
                                 <i class="fas fa-database"></i> Session Management
@@ -400,6 +406,9 @@
                                 break;
                             case 'utilization':
                                 await this.loadRoomUtilization();
+                                break;
+                            case 'timetable':
+                                await this.loadTimetable();
                                 break;
                         }
                     } catch (error) {
@@ -776,6 +785,432 @@
                         }
                     };
                 },
+
+                async loadTimetable() {
+                    const response = await fetch('views/timetable.html');
+                    const template = await response.text();
+                    
+                    this.components.timetable = {
+                        template,
+                        data() {
+                            return {
+                                timetableData: [],
+                                organizedData: {},
+                                isLoading: false,
+                                viewMode: 'table',
+                                days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+                                timeSlots: [
+                                    { time: 7, slot: 1, label: '07:00-07:50' },
+                                    { time: 8, slot: 2, label: '08:00-08:50' },
+                                    { time: 9, slot: 3, label: '09:00-09:50' },
+                                    { time: 10, slot: 4, label: '10:00-10:50' },
+                                    { time: 11, slot: 5, label: '11:00-11:50' },
+                                    { time: 12, slot: 6, label: '12:00-12:50' },
+                                    { time: 13, slot: 7, label: '13:00-13:50' },
+                                    { time: 14, slot: 8, label: '14:00-14:50' },
+                                    { time: 15, slot: 9, label: '15:00-15:50' },
+                                    { time: 16, slot: 10, label: '16:00-16:50' }
+                                ],
+                                lastUpdated: new Date().toLocaleTimeString(),
+                                totalCourses: 0,
+                                totalSessions: 0,
+                                totalHours: 0,
+                                uniqueRooms: 0
+                            };
+                        },
+                        computed: {
+                            allSessions() {
+                                const sessions = [];
+                                this.days.forEach(day => {
+                                    this.timeSlots.forEach(slot => {
+                                        const daySessions = this.getSessions(day, slot.time);
+                                        daySessions.forEach(session => {
+                                            sessions.push({
+                                                id: `${day}-${slot.time}-${session.courseCode}`,
+                                                day: day,
+                                                timeSlot: slot.label,
+                                                courseCode: session.courseCode,
+                                                courseName: session.courseName,
+                                                room: session.room
+                                            });
+                                        });
+                                    });
+                                });
+                                return sessions.sort((a, b) => {
+                                    const dayOrder = {Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5};
+                                    return dayOrder[a.day] - dayOrder[b.day] || 
+                                        parseInt(a.timeSlot) - parseInt(b.timeSlot);
+                                });
+                            },
+            
+                            uniqueCourses() {
+                                const courses = {};
+                                this.timetableData.forEach(course => {
+                                    if (!courses[course.courseCode]) {
+                                        courses[course.courseCode] = {
+                                            code: course.courseCode,
+                                            name: course.courseName,
+                                            sessions: 0,
+                                            room: 'Multiple',
+                                            section: course.section || 'N/A',
+                                            students: course.studentCount || 0
+                                        };
+                                    }
+                                    
+                                    // Count sessions for this course
+                                    if (course.schedule && Array.isArray(course.schedule)) {
+                                        courses[course.courseCode].sessions += course.schedule.length;
+                                        
+                                        // Get most common room
+                                        const rooms = course.schedule.map(s => 
+                                            s.ruang?.kod_ruang || s.kod_bilik
+                                        ).filter(r => r);
+                                        
+                                        if (rooms.length > 0) {
+                                            const roomCount = {};
+                                            rooms.forEach(room => {
+                                                roomCount[room] = (roomCount[room] || 0) + 1;
+                                            });
+                                            const mostCommonRoom = Object.keys(roomCount).reduce((a, b) => 
+                                                roomCount[a] > roomCount[b] ? a : b
+                                            );
+                                            courses[course.courseCode].room = mostCommonRoom;
+                                        }
+                                    }
+                                    
+                                    // Update student count if larger
+                                    if (course.studentCount && course.studentCount > courses[course.courseCode].students) {
+                                        courses[course.courseCode].students = course.studentCount;
+                                    }
+                                });
+                                return Object.values(courses);
+                            },
+                        },
+                        
+                        async mounted() {
+                            await this.refreshTimetable();
+                        },
+                        methods: {
+                            async refreshTimetable() {
+                                this.isLoading = true;
+                                try {
+                                    const user = JSON.parse(localStorage.getItem('user'));
+                                    console.log(`👤 Loading timetable for ${user.role}: ${user.username}`);
+                                    
+                                    let timetableData = [];
+                                    
+                                    if (user.role === 'student') {
+                                        // Student timetable
+                                        console.log('🎓 Loading student timetable...');
+                                        if (window.DashboardController && DashboardController.loadTimetableData) {
+                                            timetableData = await DashboardController.loadTimetableData(user);
+                                        }
+                                        
+                                        if (!timetableData || timetableData.length === 0) {
+                                            timetableData = await TTMS.fetchStudentTimetable(user.username);
+                                        }
+                                        
+                                    } else if (user.role === 'lecturer') {
+                                        // Lecturer timetable
+                                        console.log('👨‍🏫 Loading lecturer timetable...');
+                                        
+                                        // Method 1: Try DashboardController
+                                        if (window.DashboardController && DashboardController.loadLecturerTimetable) {
+                                            timetableData = await DashboardController.loadLecturerTimetable(user);
+                                        }
+                                        
+                                        // Method 2: Direct TTMS call
+                                        if (!timetableData || timetableData.length === 0) {
+                                            console.log('🔄 Trying direct TTMS fetch...');
+                                            timetableData = await TTMS.fetchLecturerTimetable(user.username);
+                                        }
+                                        
+                                        // Method 3: Alternative method
+                                        if (!timetableData || timetableData.length === 0) {
+                                            console.log('🔄 Trying alternative method...');
+                                            timetableData = await this.getLecturerTimetableFromCourses(user);
+                                        }
+                                        
+                                    } else if (user.role === 'admin') {
+                                        // Admin can view any timetable (optional)
+                                        console.log('👑 Admin view - no personal timetable');
+                                        this.$parent.showAlert('Admins do not have a personal timetable', 'info');
+                                        timetableData = [];
+                                    }
+                                    
+                                    console.log('📊 Final timetable data:', timetableData);
+                                    
+                                    // Process data
+                                    this.timetableData = timetableData;
+                                    this.processTimetableData();
+                                    this.calculateStatistics();
+                                    
+                                    this.lastUpdated = new Date().toLocaleTimeString();
+                                    this.$parent.showAlert(`Timetable loaded: ${this.totalCourses} courses, ${this.totalSessions} sessions`, 'success');
+                                    
+                                } catch (error) {
+                                    console.error('❌ Error loading timetable:', error);
+                                    this.$parent.showAlert('Failed to load timetable: ' + error.message, 'danger');
+                                } finally {
+                                    this.isLoading = false;
+                                }
+                            },
+
+                            // Add method to get lecturer timetable from courses
+                            async getLecturerTimetableFromCourses(user) {
+                                try {
+                                    console.log('🔄 Getting lecturer timetable from courses data...');
+                                    const currentSession = TTMS.getCurrentSession();
+                                    const allCourses = await TTMS.fetchCourses(currentSession.sesi, currentSession.semester);
+                                    
+                                    // Filter courses taught by this lecturer
+                                    const lecturerCourses = allCourses.filter(course => {
+                                        if (!course.kod_pensyarah && !course.no_pekerja) return false;
+                                        
+                                        // Check if lecturer ID matches
+                                        return course.kod_pensyarah === user.username || 
+                                            course.no_pekerja === user.username ||
+                                            (course.nama_pensyarah && course.nama_pensyarah.toLowerCase().includes(user.username.toLowerCase()));
+                                    });
+                                    
+                                    console.log(`📚 Found ${lecturerCourses.length} courses for lecturer`);
+                                    
+                                    // Group by course and section
+                                    const timetableData = [];
+                                    const processed = new Set();
+                                    
+                                    lecturerCourses.forEach(course => {
+                                        const key = `${course.kod_subjek}-${course.seksyen || '1'}`;
+                                        if (!processed.has(key)) {
+                                            processed.add(key);
+                                            
+                                            // Create schedule from course data
+                                            if (course.hari && course.masa) {
+                                                timetableData.push({
+                                                    courseCode: course.kod_subjek,
+                                                    courseName: course.nama_subjek,
+                                                    section: course.seksyen || '1',
+                                                    studentCount: course.bil_pelajar || 0,
+                                                    schedule: [{
+                                                        hari: course.hari,
+                                                        masa: course.masa,
+                                                        kod_bilik: course.kod_bilik,
+                                                        ruang: course.kod_bilik ? { kod_ruang: course.kod_bilik } : null
+                                                    }]
+                                                });
+                                            }
+                                        }
+                                    });
+                                    
+                                    return timetableData;
+                                    
+                                } catch (error) {
+                                    console.error('❌ Error in alternative lecturer timetable:', error);
+                                    return [];
+                                }
+                            },
+                            
+                            processTimetableData() {
+                                console.log('Processing timetable data with TTMS format...');
+                                
+                                // Reset organized data
+                                this.organizedData = {};
+                                this.days.forEach(day => {
+                                    this.organizedData[day] = {};
+                                    this.timeSlots.forEach(slot => {
+                                        this.organizedData[day][slot.time] = [];
+                                    });
+                                });
+                                
+                                // Process each course
+                                this.timetableData.forEach((course, courseIndex) => {
+                                    console.log(`Processing course ${courseIndex + 1}: ${course.courseCode || course.kod_subjek}`);
+                                    
+                                    // Check if course has schedule data
+                                    if (!course.schedule || !Array.isArray(course.schedule)) {
+                                        console.log(`  ⚠️ No schedule array for ${course.courseCode || course.kod_subjek}`);
+                                        return; // Skip this course
+                                    }
+                                    
+                                    course.schedule.forEach((session, sessionIndex) => {
+                                        // Get day and time slot numbers
+                                        const dayNumber = session.hari;
+                                        const timeSlotNumber = session.masa;
+                                        
+                                        console.log(`  Session ${sessionIndex + 1}: Day=${dayNumber}, TimeSlot=${timeSlotNumber}`);
+                                        
+                                        // Skip if missing data
+                                        if (dayNumber === undefined || dayNumber === null || 
+                                            timeSlotNumber === undefined || timeSlotNumber === null) {
+                                            console.log(`    ⚠️ Skipped - Missing day/time slot`);
+                                            return;
+                                        }
+                                        
+                                        // Map day number to English day name
+                                        const day = this.mapDay(dayNumber);
+                                        
+                                        // Skip Sunday (dayNumber = 1) or invalid days
+                                        if (!day) {
+                                            console.log(`    ⚠️ Skipped - Day ${dayNumber} is Sunday or invalid`);
+                                            return;
+                                        }
+                                        
+                                        // Parse time slot to actual hour
+                                        const time = this.parseTime(timeSlotNumber);
+                                        const timeLabel = this.getTimeSlotLabel(timeSlotNumber);
+                                        
+                                        console.log(`    Mapped: Day ${dayNumber} -> ${day}, Slot ${timeSlotNumber} -> ${time}:00 (${timeLabel})`);
+                                        
+                                        // Validate time is within our time slots
+                                        const validTimes = this.timeSlots.map(s => s.time);
+                                        if (!validTimes.includes(time)) {
+                                            console.log(`    ⚠️ Time ${time} not in valid slots ${validTimes}`);
+                                            return;
+                                        }
+                                        
+                                        // Add to organized data
+                                        if (this.organizedData[day] && this.organizedData[day][time]) {
+                                            // Get room information
+                                            let room = 'TBA';
+                                            if (session.ruang && session.ruang.kod_ruang) {
+                                                room = session.ruang.kod_ruang;
+                                            } else if (session.kod_bilik) {
+                                                room = session.kod_bilik;
+                                            }
+                                            
+                                            this.organizedData[day][time].push({
+                                                courseCode: course.courseCode || course.kod_subjek || 'N/A',
+                                                courseName: course.courseName || course.nama_subjek || 'Unnamed Course',
+                                                room: room,
+                                                timeSlot: timeLabel,
+                                                dayNumber: dayNumber,
+                                                timeSlotNumber: timeSlotNumber
+                                            });
+                                            
+                                            console.log(`    ✅ Added to ${day} at ${timeLabel}`);
+                                        } else {
+                                            console.log(`    ❌ Error: No slot for ${day} at ${time}:00`);
+                                        }
+                                    });
+                                });
+                                
+                                // Debug: Show organized data
+                                console.log('Organized timetable data:', this.organizedData);
+                            },
+
+                            mapDay(dayNumber) {
+                                // Handle null/undefined
+                                if (dayNumber === undefined || dayNumber === null) {
+                                    return 'Monday';
+                                }
+                                
+                                const dayNum = Number(dayNumber);
+                                
+                                // Map TTMS day numbers to English days (only Monday-Friday)
+                                const dayMap = {
+                                    2: 'Monday',    // 2 = Isnin
+                                    3: 'Tuesday',   // 3 = Selasa
+                                    4: 'Wednesday', // 4 = Rabu
+                                    5: 'Thursday',  // 5 = Khamis
+                                    6: 'Friday'     // 6 = Jumaat
+                                    // Skip 1 = Ahad (Sunday)
+                                };
+                                
+                                return dayMap[dayNum] || null; // Return null for Sunday/Saturday
+                            },
+                            
+                            parseTime(timeSlotNumber) {
+                                // Handle null/undefined
+                                if (timeSlotNumber === undefined || timeSlotNumber === null) {
+                                    return 8; // Default to 8 AM
+                                }
+                                
+                                // Convert to number
+                                const slot = Number(timeSlotNumber);
+                                
+                                // Map TTMS time slot numbers to actual hours
+                                const timeSlotMap = {
+                                    1: 7,   // 07:00-07:50
+                                    2: 8,   // 08:00-08:50
+                                    3: 9,   // 09:00-09:50
+                                    4: 10,  // 10:00-10:50
+                                    5: 11,  // 11:00-11:50
+                                    6: 12,  // 12:00-12:50
+                                    7: 13,  // 13:00-13:50 (1:00-1:50 PM)
+                                    8: 14,  // 14:00-14:50 (2:00-2:50 PM)
+                                    9: 15,  // 15:00-15:50 (3:00-3:50 PM)
+                                    10: 16  // 16:00-16:50 (4:00-4:50 PM)
+                                };
+                                
+                                return timeSlotMap[slot] || 8; // Default to 8 AM if invalid slot
+                            },
+
+                            // Also add a function to get the time slot label
+                            getTimeSlotLabel(timeSlotNumber) {
+                                const slot = Number(timeSlotNumber);
+                                const timeSlotLabels = {
+                                    1: '07:00-07:50',
+                                    2: '08:00-08:50',
+                                    3: '09:00-09:50',
+                                    4: '10:00-10:50',
+                                    5: '11:00-11:50',
+                                    6: '12:00-12:50',
+                                    7: '13:00-13:50',
+                                    8: '14:00-14:50',
+                                    9: '15:00-15:50',
+                                    10: '16:00-16:50'
+                                };
+                                
+                                return timeSlotLabels[slot] || '08:00-08:50';
+                            },
+                            
+                            hasSession(day, time) {
+                                return this.organizedData[day]?.[time]?.length > 0;
+                            },
+                            
+                            getSessions(day, time) {
+                                return this.organizedData[day]?.[time] || [];
+                            },
+                            
+                            calculateStatistics() {
+                                this.totalCourses = this.uniqueCourses.length;
+                                this.totalSessions = 0;
+                                this.totalHours = 0;
+                                this.totalStudents = 0;
+                                const roomSet = new Set();
+                                const sectionSet = new Set();
+                                
+                                // Count sessions, hours, students, and rooms
+                                this.days.forEach(day => {
+                                    this.timeSlots.forEach(slot => {
+                                        const sessions = this.getSessions(day, slot.time);
+                                        this.totalSessions += sessions.length;
+                                        this.totalHours += sessions.length; // Each session is 50 minutes ≈ 1 hour
+                                        
+                                        sessions.forEach(session => {
+                                            if (session.room && session.room !== 'TBA') {
+                                                roomSet.add(session.room);
+                                            }
+                                        });
+                                    });
+                                });
+                                
+                                // Count total students from all courses
+                                this.timetableData.forEach(course => {
+                                    if (course.studentCount) {
+                                        this.totalStudents += course.studentCount;
+                                    }
+                                    if (course.section) {
+                                        sectionSet.add(`${course.courseCode}-${course.section}`);
+                                    }
+                                });
+                                
+                                this.uniqueRooms = roomSet.size;
+                                this.uniqueSections = sectionSet.size;
+                            },
+                        }
+                    };
+                },
                 
                 async loadClashDetection() {
                     const response = await fetch('views/clash.html');
@@ -947,14 +1382,12 @@
                             },
                             async mounted() {
                                 await this.loadRoomAnalysis();
-                                // Initialize advanced charts
-                                if (window.RoomController) {
-                                    try {
-                                        await RoomController.drawRoomUtilizationDashboard();
-                                    } catch (error) {
-                                        console.error('Error drawing advanced charts:', error);
+                                
+                                this.$nextTick(() => {
+                                    if (window.RoomController) {
+                                        RoomController.drawRoomUtilizationDashboard();
                                     }
-                                }
+                                });
                             },
                             methods: {
                                 async loadRoomAnalysis() {

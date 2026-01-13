@@ -89,6 +89,152 @@ const DashboardController = {
             };
         }
     },
+
+    // Load timetable data - SIMPLIFIED VERSION
+    // In dashboardController.js, update the loadTimetableData method:
+
+    async loadTimetableData(user) {
+        try {
+            console.log('📅 Loading simplified timetable for', user.username);
+            
+            let timetableData = [];
+            const currentSession = TTMS.getCurrentSession();
+            
+            if (user.role === 'student') {
+                // Fetch student's courses
+                const courses = await TTMS.fetchMyCourses(user.username);
+                
+                // Filter current session courses
+                const currentCourses = courses.filter(c => 
+                    c.sesi === currentSession.sesi && 
+                    c.semester.toString() === currentSession.semester
+                );
+                
+                // Get schedule for each course
+                for (const course of currentCourses) {
+                    try {
+                        // Fetch course schedule
+                        const schedule = await this.fetchCourseSchedule(
+                            course.kod_subjek,
+                            currentSession.sesi,
+                            currentSession.semester,
+                            course.seksyen
+                        );
+                        
+                        // FIX: Ensure schedule has proper format
+                        const formattedSchedule = Array.isArray(schedule) ? schedule.map(s => ({
+                            hari: s.hari || null,
+                            masa: s.masa || null,
+                            ruang: s.ruang || { kod_ruang: s.kod_ruang || null },
+                            kod_bilik: s.kod_bilik || null
+                        })) : [];
+                        
+                        timetableData.push({
+                            courseCode: course.kod_subjek || 'N/A',
+                            courseName: course.nama_subjek || 'Unnamed Course',
+                            schedule: formattedSchedule
+                        });
+                        
+                    } catch (error) {
+                        console.warn(`Could not fetch schedule for ${course.kod_subjek}:`, error);
+                    }
+                }
+                
+            } else if (user.role === 'lecturer') {
+                // Fetch lecturer's subjects
+                const subjects = await TTMS.fetchLecturerSubjects(user.username);
+                
+                // Filter current session subjects
+                const currentSubjects = subjects.filter(s => 
+                    s.sesi === currentSession.sesi && 
+                    s.semester.toString() === currentSession.semester
+                );
+                
+                // Get schedule for each subject
+                for (const subject of currentSubjects) {
+                    try {
+                        const schedule = await this.fetchCourseSchedule(
+                            subject.kod_subjek,
+                            currentSession.sesi,
+                            currentSession.semester,
+                            subject.seksyen
+                        );
+                        
+                        // FIX: Ensure schedule has proper format
+                        const formattedSchedule = Array.isArray(schedule) ? schedule.map(s => ({
+                            hari: s.hari || null,
+                            masa: s.masa || null,
+                            ruang: s.ruang || { kod_ruang: s.kod_ruang || null },
+                            kod_bilik: s.kod_bilik || null
+                        })) : [];
+                        
+                        timetableData.push({
+                            courseCode: subject.kod_subjek || 'N/A',
+                            courseName: subject.nama_subjek || 'Unnamed Course',
+                            schedule: formattedSchedule
+                        });
+                        
+                    } catch (error) {
+                        console.warn(`Could not fetch schedule for ${subject.kod_subjek}:`, error);
+                    }
+                }
+            }
+            
+            console.log(`✅ Simplified timetable loaded: ${timetableData.length} courses`);
+            return timetableData;
+            
+        } catch (error) {
+            console.error('❌ Error loading simplified timetable:', error);
+            throw error;
+        }
+    },
+
+    // Helper to fetch course schedule
+    async fetchCourseSchedule(courseCode, sesi, semester, section = null) {
+        try {
+            console.log(`📅 Fetching schedule for ${courseCode}${section ? ` section ${section}` : ''}`);
+            
+            // First try jadual_subjek endpoint
+            const params = {
+                entity: 'jadual_subjek',
+                sesi: sesi,
+                semester: semester,
+                kod_subjek: courseCode
+            };
+            
+            if (section) {
+                params.seksyen = section;
+            }
+            
+            let schedule = await TTMS.fetchWithAdminSession('jadual_subjek', params);
+            
+            // If no data, try alternative approach
+            if (!schedule || schedule.length === 0) {
+                console.log(`⚠️ No schedule from jadual_subjek, trying alternative...`);
+                
+                // Get all subjects and filter
+                const allSubjects = await TTMS.fetchCourses(sesi, semester);
+                const subjectSchedule = allSubjects.filter(s => 
+                    s.kod_subjek === courseCode && 
+                    (!section || s.seksyen === section)
+                );
+                
+                schedule = subjectSchedule.map(s => ({
+                    hari: s.hari,
+                    masa: s.masa,
+                    kod_bilik: s.kod_bilik,
+                    ruang: s.kod_bilik ? { kod_ruang: s.kod_bilik } : null
+                }));
+            }
+            
+            console.log(`✅ Schedule for ${courseCode}:`, schedule);
+            return schedule;
+            
+        } catch (error) {
+            console.error(`❌ Error fetching schedule for ${courseCode}:`, error);
+            return [];
+        }
+    },
     
     // Initialize charts with REAL data
     async initCharts() {
@@ -127,6 +273,51 @@ const DashboardController = {
             
         } catch (error) {
             console.error('ERROR initializing charts:', error);
+        }
+    },
+
+    async getTimetableDataFromCourses(user) {
+        try {
+            console.log('📅 Trying alternative timetable data source...');
+            
+            const currentSession = TTMS.getCurrentSession();
+            let courses = [];
+            
+            if (user.role === 'student') {
+                courses = await TTMS.fetchMyCourses(user.username);
+            } else if (user.role === 'lecturer') {
+                // For lecturers, get courses they teach
+                const allCourses = await TTMS.fetchCourses();
+                courses = allCourses.filter(c => 
+                    c.kod_pensyarah === user.username || 
+                    c.no_pekerja === user.username
+                );
+            }
+            
+            // Filter for current session
+            const currentCourses = courses.filter(c => 
+                c.sesi === currentSession.sesi && 
+                c.semester.toString() === currentSession.semester
+            );
+            
+            // Convert to timetable format
+            const timetableData = currentCourses.map(course => ({
+                courseCode: course.kod_subjek,
+                courseName: course.nama_subjek,
+                schedule: [{
+                    hari: course.hari,
+                    masa: course.masa,
+                    kod_bilik: course.kod_bilik,
+                    ruang: course.kod_bilik ? { kod_ruang: course.kod_bilik } : null
+                }]
+            }));
+            
+            console.log(`✅ Alternative timetable data: ${timetableData.length} courses`);
+            return timetableData;
+            
+        } catch (error) {
+            console.error('❌ Error in alternative timetable:', error);
+            return [];
         }
     },
     
