@@ -136,6 +136,7 @@ const TTMS = {
 
     // ============ DATA FETCHING WITH ADMIN SESSION ============
     
+    
     async fetchWithAdminSession(entity, params = {}) {
         try {
             // Ensure admin session ID is loaded
@@ -229,6 +230,29 @@ const TTMS = {
     },
 
     // ============ SPECIFIC ENTITY FETCHERS ============
+
+    async fetchCourseSchedule(courseCode, sesi = null, semester = null, section = null) {
+    try {
+        const currentSession = this.getCurrentSession();
+        const params = {
+            entity: 'jadual_subjek',
+            sesi: sesi || currentSession.sesi,
+            semester: semester || currentSession.semester,
+            kod_subjek: courseCode
+        };
+        
+        if (section) {
+            params.seksyen = section;
+        }
+        
+        const schedule = await this.fetchWithAdminSession('jadual_subjek', params);
+        return Array.isArray(schedule) ? schedule : [];
+        
+        } catch (error) {
+            console.error(`❌ Error fetching schedule for ${courseCode}:`, error);
+            return [];
+        }
+    },
     
     async fetchCourses(sesi = null, semester = null) {
         const params = {};
@@ -273,24 +297,337 @@ const TTMS = {
         return await this.fetchWithAdminSession('pensyarah');
     },
 
-    async fetchStudents(limit = 10, offset = 0) {
-        return await this.fetchWithAdminSession('pelajar', {
-            limit: limit,
-            offset: offset
-        });
+    // Fetch lecturer subjects
+    async fetchLecturerSubjects(lecturerId) {
+        try {
+            const params = {
+                entity: 'pensyarah_subjek',
+                no_pekerja: lecturerId
+            };
+            
+            return await this.fetchWithAdminSession('pensyarah_subjek', params);
+            
+        } catch (error) {
+            console.error('Error fetching lecturer subjects:', error);
+            return [];
+        }
     },
+
+    async fetchLecturerTimetable(lecturerId) {
+    try {
+        console.log('👨‍🏫 Fetching lecturer timetable for:', lecturerId);
+        
+        // Get current session
+        const currentSession = this.getCurrentSession();
+        
+        // Method 1: Try to get from pensyarah_subjek endpoint
+        try {
+            const lecturerSubjects = await this.fetchWithAdminSession('pensyarah_subjek', {
+                no_pekerja: lecturerId
+            });
+            
+            console.log(`📚 Lecturer subjects found: ${lecturerSubjects.length}`);
+            
+            // Filter for current session
+            const currentSubjects = lecturerSubjects.filter(subject => 
+                subject.sesi === currentSession.sesi && 
+                subject.semester.toString() === currentSession.semester
+            );
+            
+            console.log(`📅 Current session subjects: ${currentSubjects.length}`);
+            
+            // Get schedule for each subject
+            const timetableData = [];
+            for (const subject of currentSubjects) {
+                try {
+                    const schedule = await this.fetchCourseSchedule(
+                        subject.kod_subjek,
+                        currentSession.sesi,
+                        currentSession.semester,
+                        subject.seksyen
+                    );
+                    
+                    if (schedule && schedule.length > 0) {
+                        timetableData.push({
+                            courseCode: subject.kod_subjek,
+                            courseName: subject.nama_subjek,
+                            section: subject.seksyen,
+                            studentCount: subject.bil_pelajar || 0,
+                            schedule: schedule
+                        });
+                        console.log(`✅ Added: ${subject.kod_subjek} (${subject.seksyen}) - ${schedule.length} sessions`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Could not fetch schedule for ${subject.kod_subjek}:`, error.message);
+                }
+            }
+            
+            if (timetableData.length > 0) {
+                console.log(`✅ Lecturer timetable loaded: ${timetableData.length} subjects`);
+                return timetableData;
+            }
+            } catch (error) {
+                console.warn('⚠️ Method 1 failed:', error.message);
+            }
+            
+            // Method 2: Try to get from courses where lecturer is assigned
+            try {
+                console.log('🔄 Trying Method 2: Fetching all courses...');
+                const allCourses = await this.fetchCourses(currentSession.sesi, currentSession.semester);
+                
+                // Filter courses taught by this lecturer
+                const lecturerCourses = allCourses.filter(course => {
+                    // Check various lecturer ID fields
+                    return course.kod_pensyarah === lecturerId || 
+                        course.no_pekerja === lecturerId ||
+                        (course.nama_pensyarah && course.nama_pensyarah.includes(lecturerId));
+                });
+                
+                console.log(`📚 Courses found for lecturer: ${lecturerCourses.length}`);
+                
+                // Get unique courses (group by course code and section)
+                const uniqueCourses = [];
+                const courseKeySet = new Set();
+                
+                lecturerCourses.forEach(course => {
+                    const key = `${course.kod_subjek}-${course.seksyen || '1'}`;
+                    if (!courseKeySet.has(key)) {
+                        courseKeySet.add(key);
+                        uniqueCourses.push(course);
+                    }
+                });
+                
+                // Build timetable data
+                const timetableData = [];
+                for (const course of uniqueCourses) {
+                    try {
+                        const schedule = await this.fetchCourseSchedule(
+                            course.kod_subjek,
+                            currentSession.sesi,
+                            currentSession.semester,
+                            course.seksyen
+                        );
+                        
+                        if (schedule && schedule.length > 0) {
+                            timetableData.push({
+                                courseCode: course.kod_subjek,
+                                courseName: course.nama_subjek,
+                                section: course.seksyen || '1',
+                                studentCount: course.bil_pelajar || 0,
+                                schedule: schedule
+                            });
+                        } else {
+                            // If no schedule from API, create from course data
+                            if (course.hari && course.masa) {
+                                timetableData.push({
+                                    courseCode: course.kod_subjek,
+                                    courseName: course.nama_subjek,
+                                    section: course.seksyen || '1',
+                                    studentCount: course.bil_pelajar || 0,
+                                    schedule: [{
+                                        hari: course.hari,
+                                        masa: course.masa,
+                                        kod_bilik: course.kod_bilik,
+                                        ruang: course.kod_bilik ? { kod_ruang: course.kod_bilik } : null
+                                    }]
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`⚠️ Could not process ${course.kod_subjek}:`, error.message);
+                    }
+                }
+                
+                if (timetableData.length > 0) {
+                    console.log(`✅ Lecturer timetable (Method 2): ${timetableData.length} courses`);
+                    return timetableData;
+                }
+                
+            } catch (error) {
+                console.warn('⚠️ Method 2 failed:', error.message);
+            }
+            
+            console.log('⚠️ No timetable data found for lecturer');
+            return [];
+            
+        } catch (error) {
+            console.error('❌ Error fetching lecturer timetable:', error);
+            return [];
+        }
+    },
+
+    // ============ STUDENTS FETCHING ============
+
+    async fetchStudents(sesi = null, semester = null) {
+        try {
+            console.log('📊 Fetching students list from TTMS...');
+            
+            // Get admin session ID
+            if (!this.adminSessionId) {
+                this.adminSessionId = localStorage.getItem('ttms_admin_session_id');
+                if (!this.adminSessionId) {
+                    throw new Error('No admin session ID available');
+                }
+            }
+            
+            const currentSession = this.getCurrentSession();
+            
+            // Build parameters
+            const params = {
+                entity: 'pelajar',
+                session_id: this.adminSessionId,
+                sesi: sesi || currentSession.sesi,
+                semester: semester || currentSession.semester
+            };
+            
+            // Remove any undefined/null parameters
+            Object.keys(params).forEach(key => {
+                if (params[key] === undefined || params[key] === null) {
+                    delete params[key];
+                }
+            });
+            
+            // Build query string
+            const queryString = Object.entries(params)
+                .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+                .join('&');
+            
+            const url = `${this.BASE_URL}?${queryString}`;
+            console.log('📡 Students URL:', url);
+            
+            // Make AJAX request
+            const response = await fetch(url);
+            const text = await response.text();
+            
+            console.log('📥 Students raw response:', text.substring(0, 200));
+            
+            // Parse response
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.warn('⚠️ Students: Response not pure JSON. Attempting extraction...');
+                const jsonMatch = text.match(/\[.*\]/s);
+                if (jsonMatch) {
+                    try {
+                        data = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        console.error('❌ Students: Could not extract valid JSON');
+                        return [];
+                    }
+                } else {
+                    console.error('❌ Students: No JSON found in response');
+                    return [];
+                }
+            }
+            
+            // Process data
+            if (Array.isArray(data)) {
+                console.log(`✅ Students: Retrieved ${data.length} records`);
+                return data;
+            } else if (data && typeof data === 'object') {
+                // Check for nested data
+                if (data.pelajar && Array.isArray(data.pelajar)) {
+                    console.log(`✅ Students: Retrieved ${data.pelajar.length} records (nested)`);
+                    return data.pelajar;
+                }
+                // If object has array values
+                const values = Object.values(data);
+                if (values.length > 0 && Array.isArray(values[0])) {
+                    console.log(`✅ Students: Retrieved ${values[0].length} records (nested array)`);
+                    return values[0];
+                }
+                console.log(`✅ Students: Retrieved ${values.length} records (object values)`);
+                return values;
+            }
+            
+            console.log('⚠️ Students: No data returned');
+            return [];
+            
+        } catch (error) {
+            console.error('❌ Error fetching students:', error);
+            return [];
+        }
+    },
+
+    // ============ STUDENT DATA ============
 
     async fetchTotalStudents() {
         try {
-            // Try to get from students endpoint
-            const students = await this.fetchStudents(1, 0);
-            if (students && students.length > 0) {
-                // For demo, return an estimate
-                return 15000;
+            console.log('📊 Fetching total students from TTMS...');
+            
+            // Get admin session ID
+            if (!this.adminSessionId) {
+                this.adminSessionId = localStorage.getItem('ttms_admin_session_id');
+                if (!this.adminSessionId) {
+                    console.error('❌ No admin session ID available');
+                    return 0;
+                }
             }
+            
+            const currentSession = this.getCurrentSession();
+            
+            // Build URL for students endpoint
+            const url = `${this.BASE_URL}?entity=pelajar&session_id=${this.adminSessionId}&sesi=${currentSession.sesi}&semester=${currentSession.semester}`;
+            
+            console.log('📡 Fetching students from:', url);
+            
+            // Make AJAX request using Fetch API
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                console.error(`❌ HTTP error! Status: ${response.status}`);
+                return 0;
+            }
+            
+            const text = await response.text();
+            console.log('📥 Students response received');
+            
+            // Parse response
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.warn('⚠️ Response not pure JSON. Attempting extraction...');
+                const jsonMatch = text.match(/\[.*\]/s);
+                if (jsonMatch) {
+                    try {
+                        data = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        console.error('❌ Could not extract valid JSON from students response');
+                        return 0;
+                    }
+                } else {
+                    console.error('❌ No JSON found in students response');
+                    return 0;
+                }
+            }
+            
+            // Process data
+            if (Array.isArray(data)) {
+                console.log(`✅ Total students retrieved: ${data.length}`);
+                return data.length;
+            } else if (data && typeof data === 'object') {
+                // Check for nested data
+                if (data.pelajar && Array.isArray(data.pelajar)) {
+                    console.log(`✅ Total students retrieved (nested): ${data.pelajar.length}`);
+                    return data.pelajar.length;
+                }
+                // If object has array values
+                const values = Object.values(data);
+                if (values.length > 0 && Array.isArray(values[0])) {
+                    console.log(`✅ Total students retrieved (nested array): ${values[0].length}`);
+                    return values[0].length;
+                }
+                console.log(`✅ Total students retrieved (object values): ${values.length}`);
+                return values.length;
+            }
+            
+            console.log('⚠️ No student data returned');
             return 0;
+            
         } catch (error) {
-            console.error('Error fetching total students:', error);
+            console.error('❌ Error fetching total students:', error);
             return 0;
         }
     },
