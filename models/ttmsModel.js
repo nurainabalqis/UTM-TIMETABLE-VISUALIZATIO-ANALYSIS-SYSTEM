@@ -1,3 +1,31 @@
+// models/ttmsModel.js - CORRECTED VERSION
+
+// ===== TTMS CONSTANTS (GLOBAL TO MODEL) =====
+const DAY_MAP_NUM = {
+    1: 'Sunday',
+    2: 'Monday',
+    3: 'Tuesday',
+    4: 'Wednesday',
+    5: 'Thursday',
+    6: 'Friday',
+    7: 'Saturday'
+};
+
+const MASA_TO_HOUR = {
+    1: 8,
+    2: 9,
+    3: 9,
+    4: 10,
+    5: 11,
+    6: 12,
+    7: 14,
+    8: 15,
+    9: 16,
+    10: 17,
+    11: 18,
+    12: 19
+};
+
 // models/ttmsModel.js - FIXED VERSION
 const TTMS = {
     BASE_URL: "http://web.fc.utm.my/ttms/web_man_webservice_json.cgi",
@@ -685,6 +713,157 @@ const TTMS = {
                 };
             });
 
+        // Faculty distribution
+        if (analysis.byFaculty) {
+            chartData.facultyDistribution = Object.entries(analysis.byFaculty)
+                .map(([faculty, count]) => ({ faculty, count }))
+                .sort((a, b) => b.count - a.count);
+        }
+
+        // Capacity distribution
+        if (analysis.byCapacity) {
+            chartData.capacityDistribution = [
+                { category: 'Small (≤30)', count: analysis.byCapacity.small || 0, color: '#4ECDC4' },
+                { category: 'Medium (31-100)', count: analysis.byCapacity.medium || 0, color: '#45B7D1' },
+                { category: 'Large (101-300)', count: analysis.byCapacity.large || 0, color: '#96CEB4' },
+                { category: 'Extra Large (>300)', count: analysis.byCapacity.extraLarge || 0, color: '#FEA47F' }
+            ];
+        }
+
+        // Top rooms by capacity (top 15)
+        if (analysis.detailedRooms) {
+            chartData.topRoomsByCapacity = analysis.detailedRooms
+                .slice(0, 15)
+                .map(room => ({
+                    roomCode: room.code,
+                    shortName: room.shortName,
+                    type: room.type,
+                    usageHours: room.usageHours,
+                    subjectCount: room.subjectCount,
+                    capacity: room.capacity
+                }));
+        }
+
+        return chartData;
+    },
+    
+    // ============ ANALYTICS DATA ============
+    
+
+    // ================= FIXED PEAK TEACHING HOURS (LECTURER) =================
+    async fetchPeakTeachingHoursForLecturer(user) {
+        console.log('📊 Fetching REAL peak teaching hours for lecturer');
+
+        const currentSession = this.getCurrentSession();
+
+        // Track: day|hour -> count (for finding peak specific slot)
+        const hourDayMap = {};
+        // Track: hour -> total count (for chart display)
+        const hourOnlyMap = {};
+
+        try {
+            // 1. Get all subjects in current session
+            const allSubjects = await this.fetchCourses(
+                currentSession.sesi,
+                currentSession.semester
+            );
+
+            // 2. Find subjects taught by this lecturer
+            const lecturerSubjects = [];
+            for (const sub of allSubjects) {
+                const teaches = await this.doesLecturerTeachSubject(user.nama, sub);
+                if (teaches) lecturerSubjects.push(sub);
+            }
+
+            console.log(`👨‍🏫 Lecturer teaches ${lecturerSubjects.length} subjects`);
+
+            if (lecturerSubjects.length === 0) return [];
+
+            // 3. Fetch timetable for each subject
+            for (const subject of lecturerSubjects) {
+                if (!subject.kod_subjek || !subject.seksyen) continue;
+
+                const url = `${this.BASE_URL}?entity=jadual_subjek`
+                    + `&sesi=${subject.sesi}`
+                    + `&semester=${subject.semester}`
+                    + `&kod_subjek=${subject.kod_subjek}`
+                    + `&seksyen=${subject.seksyen}`;
+
+                const res = await fetch(url);
+                const text = await res.text();
+                const timetable = this.parseTTMSResponse(text, 'JadualSubjek');
+
+                if (!Array.isArray(timetable)) continue;
+
+                timetable.forEach(slot => {
+                    let hour = null;
+
+                    if (slot.jam) {
+                        hour = typeof slot.jam === 'string'
+                            ? parseInt(slot.jam.split(':')[0])
+                            : slot.jam;
+                    } else if (slot.masa) {
+                        hour = MASA_TO_HOUR[slot.masa];
+                    }
+
+                    const dayName = this.getDayNameFromHari(slot.hari);
+                    if (!dayName || hour === null) return;
+
+                    // Track by day+hour for peak finding
+                    const dayHourKey = `${dayName}|${hour}`;
+                    hourDayMap[dayHourKey] = (hourDayMap[dayHourKey] || 0) + 1;
+
+                    // Track by hour only for chart
+                    const hourKey = `${hour}:00`;
+                    hourOnlyMap[hourKey] = (hourOnlyMap[hourKey] || 0) + 1;
+                });
+            }
+
+            console.log('✅ Lecturer hourDayMap:', hourDayMap);
+            console.log('✅ Lecturer hourOnlyMap:', hourOnlyMap);
+
+            // Find the peak slot (specific day + time with most classes)
+            let peakDay = '';
+            let peakHour = '';
+            let peakCount = 0;
+
+            Object.entries(hourDayMap).forEach(([key, count]) => {
+                if (count > peakCount) {
+                    const [day, hour] = key.split('|');
+                    peakDay = day;
+                    peakHour = hour;
+                    peakCount = count;
+                }
+            });
+            // Store peak info for display
+            this._peakInfo = {
+                day: peakDay,
+                hour: `${peakHour}:00`,
+                count: peakCount
+            };
+
+            // Return aggregated by hour for chart (NO DUPLICATES)
+            return Object.entries(hourOnlyMap)
+                .map(([hour, count]) => ({
+                    day: 'All Days', // This will show as aggregate
+                    hour,
+                    count
+                }))
+                .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+
+        } catch (err) {
+            console.error('❌ Error fetching peak teaching hours', err);
+            return [];
+        }
+    },
+
+    // Get lecturer workload - REAL CALCULATION from TTMS data
+    async fetchLecturerWorkload() {
+        console.log('📊 Deriving lecturer workload from TTMS course catalog');
+
+        
+        const courses = await this.fetchCourses();
+        if (!courses.length) return [];
             // Count usage from courses
             courses.forEach(c => {
                 if (!c.kod_bilik || !roomUsageMap[c.kod_bilik]) return;
@@ -768,7 +947,173 @@ const TTMS = {
         }
         return { sesi: '2025/2026', semester: '1' };
     },
+
+    // Add this NEW function in ttmsModel.js
+
+    async fetchLecturerCourses(no_pekerja) {
+        try {
+            console.log(`📚 Fetching courses for lecturer: ${no_pekerja}`);
+        
+            const url = `${this.BASE_URL}?entity=pensyarah_subjek&no_pekerja=${no_pekerja}`;
+            console.log('Lecturer Courses URL:', url);
+
+            const response = await fetch(url);
+            const text = await response.text();
+
+            const data = this.parseTTMSResponse(text, 'LecturerCourses');
+            if (!data) return [];
+
+            if (Array.isArray(data)) {
+                console.log(`✅ Retrieved ${data.length} courses for lecturer`);
+                return data;
+            }
+
+            return [];
+        } catch (error) {
+            console.error('ERROR fetching lecturer courses:', error);
+            return [];
+        }
+    },
+
+    async doesLecturerTeachSubject(lecturerName, subject) {
+        if (!lecturerName || !subject?.kod_subjek || !subject?.seksyen) return false;
+
+        const url = `${this.BASE_URL}?entity=subjek_pensyarah`
+            + `&kod_subjek=${subject.kod_subjek}`
+            + `&sesi=${subject.sesi}`
+            + `&semester=${subject.semester}`
+            + `&seksyen=${subject.seksyen}`;
+
+        try {
+            const res = await fetch(url);
+            const text = await res.text();
+            const data = this.parseTTMSResponse(text, 'SubjekPensyarah');
+
+            if (!Array.isArray(data)) return false;
+
+            return data.some(p =>
+                p.nama?.toUpperCase() === lecturerName.toUpperCase()
+            );
+        } catch (err) {
+            console.error('❌ Error checking lecturer subject:', err);
+            return false;
+        }
+    },
     
+    // ================= FIXED PEAK STUDY HOURS (STUDENT) =================
+async fetchPeakStudyHoursForStudent(user) {
+    console.log('📊 Fetching REAL peak study hours for student');
+
+    const currentSession = this.getCurrentSession();
+    
+    // Track: day|hour -> count (for finding peak specific slot)
+    const hourDayMap = {};
+    // Track: hour -> total count (for chart display)
+    const hourOnlyMap = {};
+
+    try {
+        // 1. Get student's enrolled subjects
+        const subjects = await this.fetchMyCourses(user.username);
+        if (!subjects.length) {
+            console.warn('⚠️ Student has no subjects');
+            return [];
+        }
+
+        // 2. Filter current session
+        const currentSubjects = subjects.filter(s =>
+            s.sesi === currentSession.sesi &&
+            String(s.semester) === String(currentSession.semester)
+        );
+
+        console.log(`📚 Student current subjects: ${currentSubjects.length}`);
+
+        if (!currentSubjects.length) return [];
+
+        // 3. Fetch timetable for each subject
+        for (const subject of currentSubjects) {
+            if (!subject.kod_subjek || !subject.seksyen) continue;
+
+            const url = `${this.BASE_URL}?entity=jadual_subjek`
+                + `&sesi=${subject.sesi}`
+                + `&semester=${subject.semester}`
+                + `&kod_subjek=${subject.kod_subjek}`
+                + `&seksyen=${subject.seksyen}`;
+
+            const res = await fetch(url);
+            const text = await res.text();
+            const timetable = this.parseTTMSResponse(text, 'JadualSubjek');
+
+            if (!Array.isArray(timetable)) continue;
+
+            timetable.forEach(slot => {
+                let hour = null;
+
+                // Prefer jam
+                if (slot.jam) {
+                    hour = typeof slot.jam === 'string'
+                        ? parseInt(slot.jam.split(':')[0])
+                        : slot.jam;
+                }
+                // Fallback to masa
+                else if (slot.masa) {
+                    hour = MASA_TO_HOUR[slot.masa];
+                }
+
+                const dayName = this.getDayNameFromHari(slot.hari);
+                if (!dayName || hour === null) return;
+
+                // Track by day+hour for peak finding
+                const dayHourKey = `${dayName}|${hour}`;
+                hourDayMap[dayHourKey] = (hourDayMap[dayHourKey] || 0) + 1;
+
+                // Track by hour only for chart
+                const hourKey = `${hour}:00`;
+                hourOnlyMap[hourKey] = (hourOnlyMap[hourKey] || 0) + 1;
+            });
+        }
+
+        console.log('✅ Student hourDayMap:', hourDayMap);
+        console.log('✅ Student hourOnlyMap:', hourOnlyMap);
+
+        // Find the peak slot (specific day + time with most classes)
+        let peakDay = '';
+        let peakHour = '';
+        let peakCount = 0;
+
+        Object.entries(hourDayMap).forEach(([key, count]) => {
+            if (count > peakCount) {
+                const [day, hour] = key.split('|');
+                peakDay = day;
+                peakHour = hour;
+                peakCount = count;
+            }
+        });
+
+        // Store peak info for display
+        this._peakInfo = {
+            day: peakDay,
+            hour: `${peakHour}:00`,
+            count: peakCount
+        };
+
+        // Return aggregated by hour for chart (NO DUPLICATES)
+        return Object.entries(hourOnlyMap)
+            .map(([hour, count]) => ({
+                day: 'All Days', // This will show as aggregate
+                hour,
+                count
+            }))
+            .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+
+    } catch (err) {
+        console.error('❌ Error fetching peak study hours', err);
+        return [];
+    }
+},
+
+    // Get weekly usage pattern - REAL CALCULATION from TTMS data
+    async fetchWeeklyUsagePattern() {
+        console.log('📊 Deriving weekly usage pattern from TTMS course catalog');
     setCurrentSession(sesi, semester) {
         const session = { sesi, semester };
         localStorage.setItem('currentSession', JSON.stringify(session));
@@ -814,6 +1159,135 @@ const TTMS = {
             return [];
         }
     },
+
+    async fetchWeeklyDistributionForUser(user) {
+    console.log('📊 Fetching REAL weekly distribution for:', user.username);
+    
+    const currentSession = this.getCurrentSession();
+    console.log('📅 Current session:', currentSession);
+
+    // Initialize weekly structure (5 days only)
+    const weekly = {
+        Monday: { morning: 0, afternoon: 0, evening: 0 },
+        Tuesday: { morning: 0, afternoon: 0, evening: 0 },
+        Wednesday: { morning: 0, afternoon: 0, evening: 0 },
+        Thursday: { morning: 0, afternoon: 0, evening: 0 },
+        Friday: { morning: 0, afternoon: 0, evening: 0 }
+    };
+
+    try {
+        // 1. Get student's enrolled courses
+        let subjects = [];
+        if (user.role === 'student') {
+            subjects = await this.fetchMyCourses(user.username);
+        } else if (user.role === 'lecturer') {
+            console.log('👨‍🏫 Building lecturer subject list via TTMS');
+
+            const allSubjects = await this.fetchCourses(
+                currentSession.sesi,
+                currentSession.semester
+            );
+
+            subjects = [];
+            for (const sub of allSubjects) {
+                const teaches = await this.doesLecturerTeachSubject(user.nama, sub);
+                if (teaches) {
+                    subjects.push(sub);
+            }
+    }
+
+            console.log(`✅ Lecturer teaches ${subjects.length} subjects`);
+        } else {
+            console.warn('⚠️ User is not student or lecturer');
+            return weekly;
+        }
+
+        console.log('Total enrolled courses found:', subjects.length);
+
+        
+        // 2. Filter only current session courses
+        console.log('📚 All courses:', subjects);
+
+        const currentSubjects = subjects.filter(s => {
+            console.log(`Checking course: ${s.kod_subjek}, sesi=${s.sesi}, semester=${s.semester}`);
+            console.log(`Against: currentSession.sesi=${currentSession.sesi}, currentSession.semester=${currentSession.semester}`);
+    
+        const match = s.sesi === currentSession.sesi &&
+            String(s.semester) === String(currentSession.semester);
+    
+        console.log(`Match result: ${match}`);
+        return match;
+    });
+
+    console.log('✅ Current session courses:', currentSubjects.length);
+
+        if (currentSubjects.length === 0) {
+            console.warn('⚠️ No courses found for current session');
+            return weekly;
+        }
+
+        // 3. For each course, fetch its timetable
+        for (const subject of currentSubjects) {
+            if (!subject.kod_subjek || !subject.seksyen) {
+                console.warn('⚠️ Skipping subject without code/section:', subject);
+                continue;
+            }
+
+            const url = `${this.BASE_URL}?entity=jadual_subjek&sesi=${subject.sesi}&semester=${subject.semester}&kod_subjek=${subject.kod_subjek}&seksyen=${subject.seksyen}`;
+            
+            console.log(`🔍 Fetching: ${subject.kod_subjek} - ${subject.nama_subjek}`);
+
+            try {
+                const res = await fetch(url);
+                const text = await res.text();
+                const timetable = this.parseTTMSResponse(text, 'JadualSubjek');
+
+                if (!Array.isArray(timetable) || timetable.length === 0) {
+                    console.warn(`⚠️ No timetable data for ${subject.kod_subjek}`);
+                    continue;
+                }
+
+                console.log(`   📅 Found ${timetable.length} time slots`);
+
+                // 4. Process each time slot (only use hari, masa, jam from TTMS)
+                timetable.forEach((slot, index) => {
+                    console.log(`      Slot ${index + 1}: hari=${slot.hari}, masa=${slot.masa}, jam=${slot.jam}`);
+
+                    // Get day name from TTMS hari field
+                    const dayName = this.getDayNameFromHari(slot.hari);
+                    
+                    // Get time block from TTMS masa or jam field
+                    const timeBlock = this.getTimeBlockFromMasaJam(slot.masa, slot.jam);
+
+                    console.log(`         → ${dayName} ${timeBlock}`);
+
+                    // Only count Monday-Friday
+                    if (weekly[dayName] && timeBlock) {
+                        weekly[dayName][timeBlock]++;
+                        console.log(`         ✅ Counted!`);
+                    } else if (dayName === 'Saturday' || dayName === 'Sunday') {
+                        console.log(`         ⏭️ Skipped weekend`);
+                    } else {
+                        console.warn(`         ⚠️ Invalid: ${dayName} / ${timeBlock}`);
+                    }
+                });
+
+            } catch (error) {
+                console.error(`❌ Error fetching timetable for ${subject.kod_subjek}:`, error);
+            }
+        }
+
+        console.log('✅ Final weekly distribution:', weekly);
+        return weekly;
+
+    } catch (error) {
+        console.error('❌ Error in fetchWeeklyDistributionForUser:', error);
+        return weekly; // Return empty structure on error
+    }
+},
+    // Get peak hours data - REAL CALCULATION from TTMS data
+    async fetchPeakHoursData() {
+        console.log('📊 Deriving peak hours from TTMS course load');
 
     async fetchWeeklyUsagePattern() {
         try {
@@ -1012,6 +1486,199 @@ const TTMS = {
                 timetableCount: 0
             };
         }
+    },
+    
+    // ============ HELPER FUNCTIONS ============
+    
+    mapDayToEnglish(dayName) {
+        const dayMap = {
+            'ISNIN': 'Monday',
+            'SELASA': 'Tuesday',
+            'RABU': 'Wednesday',
+            'KHAMIS': 'Thursday',
+            'JUMAAT': 'Friday',
+            'MONDAY': 'Monday',
+            'TUESDAY': 'Tuesday',
+            'WEDNESDAY': 'Wednesday',
+            'THURSDAY': 'Thursday',
+            'FRIDAY': 'Friday'
+        };
+        
+        const upperDay = dayName.toUpperCase();
+        return dayMap[upperDay] || dayName;
+    },
+    
+    getTimeBlockFromMasa(masa) {
+    const hour = MASA_TO_HOUR[masa];
+    if (!hour) {
+        console.warn(`⚠️ Unknown masa value: ${masa}`);
+        return null;
+    }
+
+    if (hour >= 8 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 18) return 'afternoon';
+    if (hour >= 18 && hour < 22) return 'evening';
+    
+    console.warn(`⚠️ Hour ${hour} outside defined blocks`);
+    return null;
+},
+
+    categorizeTime(timeStr) {
+        if (!timeStr) return null;
+        
+        const hour = this.extractHourFromTime(timeStr);
+        if (hour === null) return null;
+        
+        if (hour >= 8 && hour < 12) return 'morning';
+        if (hour >= 14 && hour < 18) return 'afternoon';
+        if (hour >= 18 && hour < 22) return 'evening';
+        
+        return null;
+    },
+
+    getDayNameFromHari(hari) {
+   
+    if (typeof hari === 'number') {
+        const dayMap = {
+            2: 'Monday',
+            3: 'Tuesday',
+            4: 'Wednesday',
+            5: 'Thursday',
+            6: 'Friday'
+            // 1 (Sunday) and 7 (Saturday) excluded
+        };
+        return dayMap[hari] || null;
+    }
+    
+   
+    if (typeof hari === 'string') {
+        const dayMapMalay = {
+            'ISNIN': 'Monday',
+            'SELASA': 'Tuesday',
+            'RABU': 'Wednesday',
+            'KHAMIS': 'Thursday',
+            'JUMAAT': 'Friday'
+        };
+        return dayMapMalay[hari.toUpperCase()] || null;
+    }
+    
+    return null;
+},
+
+// Helper: Convert TTMS masa/jam to time block (morning/afternoon/evening)
+getTimeBlockFromMasaJam(masa, jam) {
+    let hour = null;
+    
+
+    if (jam) {
+        // jam might be like "08:00", "14:00", etc.
+        if (typeof jam === 'string' && jam.includes(':')) {
+            hour = parseInt(jam.split(':')[0]);
+        } else if (typeof jam === 'number') {
+            hour = jam;
+        }
+    }
+    
+    
+    if (hour === null && masa) {
+        const masaToHour = {
+            1: 8,   // 8:00 AM
+            2: 9,   // 9:00 AM
+            3: 10,  // 10:00 AM
+            4: 11,  // 11:00 AM
+            5: 12,  // 12:00 PM
+            6: 14,  // 2:00 PM
+            7: 15,  // 3:00 PM
+            8: 16,  // 4:00 PM
+            9: 17,  // 5:00 PM
+            10: 18, // 6:00 PM
+            11: 19, // 7:00 PM
+            12: 20  // 8:00 PM
+        };
+        hour = masaToHour[masa];
+    }
+    
+    if (!hour) {
+        console.warn(`⚠️ Cannot determine hour from masa=${masa}, jam=${jam}`);
+        return null;
+    }
+    
+    // Categorize into time blocks
+    if (hour >= 8 && hour < 12) {
+        return 'morning';     // 8 AM - 11:59 AM
+    } else if (hour >= 12 && hour < 18) {
+        return 'afternoon';   // 12 PM - 5:59 PM
+    } else if (hour >= 18 && hour < 22) {
+        return 'evening';     // 6 PM - 9:59 PM
+    }
+    
+    return null;
+},
+    
+    extractHourFromTime(timeStr) {
+        if (!timeStr) return null;
+        
+        const match = timeStr.match(/(\d{1,2}):/);
+        return match ? parseInt(match[1]) : null;
+    },
+    
+    getTimeSlotIndex(hour) {
+        if (hour === null) return -1;
+        
+        const slots = [
+            [8, 9], [9, 10], [10, 11], [11, 12],
+            [12, 13], [14, 15], [15, 16], [16, 17], [17, 18]
+        ];
+        
+        for (let i = 0; i < slots.length; i++) {
+            if (hour >= slots[i][0] && hour < slots[i][1]) {
+                return i;
+            }
+        }
+        return -1;
+    },
+    
+    getTimeSlotFromHour(hour) {
+        if (hour === null || hour === undefined) return 'Unknown';
+        
+        if (hour >= 8 && hour < 9) return '8-9 AM';
+        else if (hour >= 9 && hour < 10) return '9-10 AM';
+        else if (hour >= 10 && hour < 11) return '10-11 AM';
+        else if (hour >= 11 && hour < 12) return '11-12 PM';
+        else if (hour >= 12 && hour < 13) return '12-1 PM';
+        else if (hour >= 14 && hour < 15) return '2-3 PM';
+        else if (hour >= 15 && hour < 16) return '3-4 PM';
+        else if (hour >= 16 && hour < 17) return '4-5 PM';
+        else if (hour >= 17 && hour < 18) return '5-6 PM';
+        else if (hour >= 18 && hour < 19) return '6-7 PM';
+        else if (hour >= 19 && hour < 20) return '7-8 PM';
+        else return `${hour}-${hour+1}`;
+    },
+    
+    calculateWeeklyHours(schedule) {
+        if (!schedule || schedule.length === 0) return 0;
+        
+        const hoursPerSession = 2;
+        return schedule.length * hoursPerSession;
+    },
+    
+    calculateHoursByDay(schedule) {
+        const dayMap = {
+            1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun'
+        };
+        
+        const hoursByDay = {
+            Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0
+        };
+        
+        schedule.forEach(item => {
+            if (item.hari && dayMap[item.hari]) {
+                const day = dayMap[item.hari];
+                hoursByDay[day] += 2;
+            }
+        });
+        
+        return hoursByDay;
     }
 };
 

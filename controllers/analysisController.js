@@ -24,9 +24,12 @@ class AnalysisController {
             // Load charts
             await Promise.all([
                 this.loadWorkloadChart(),
-                this.loadWeeklyUsageChart(),
+                //this.loadWeeklyUsageChart(),
                 this.loadPeakHoursChart()
             ]);
+
+            await this.loadWeeklyChartChartJS();
+
             
             console.log('AnalysisController: All charts loaded successfully');
         } catch (error) {
@@ -74,92 +77,171 @@ class AnalysisController {
     }
     
     // Load weekly usage chart
-    async loadWeeklyUsageChart() {
-        try {
-            const weeklyData = await TTMS.fetchWeeklyUsagePattern();
-            
-            if (!weeklyData) {
-                console.warn('No weekly data available');
-                return;
-            }
-            
-            google.charts.setOnLoadCallback(() => {
-                const data = new google.visualization.DataTable();
-                data.addColumn('string', 'Day');
-                data.addColumn('number', 'Morning');
-                data.addColumn('number', 'Afternoon');
-                data.addColumn('number', 'Evening');
-                
-                weeklyData.days.forEach((day, index) => {
-                    data.addRow([
-                        day,
-                        weeklyData.morning[index],
-                        weeklyData.afternoon[index],
-                        weeklyData.evening[index]
-                    ]);
-                });
-                
-                const options = {
-                    title: 'Weekly Session Distribution',
-                    colors: ['#FF9800', '#4CAF50', '#2196F3'],
-                    backgroundColor: 'transparent',
-                    hAxis: { title: 'Day' },
-                    vAxis: { title: 'Number of Sessions', minValue: 0 },
-                    chartArea: { width: '80%', height: '70%' }
-                };
-                
-                const container = document.getElementById('weeklyChart');
-                if (container) {
-                    const chart = new google.visualization.ColumnChart(container);
-                    chart.draw(data, options);
-                    this.charts.weekly = chart;
-                }
-            });
-        } catch (error) {
-            console.error('Error loading weekly chart:', error);
+    async loadWeeklyChartChartJS() {
+    try {
+        console.log('AnalysisController: Drawing WEEKLY chart using Chart.js');
+
+        const user = JSON.parse(localStorage.getItem('user'));
+        if (!user) {
+            console.warn('No user found');
+            return;
         }
+
+        const weekly = await TTMS.fetchWeeklyDistributionForUser(user);
+        if (!weekly) {
+            console.warn('No weekly distribution data');
+            return;
+        }
+
+        const canvas = document.getElementById('weeklyChart');
+        if (!canvas) {
+            console.error('weeklyChart canvas not found');
+            return;
+        }
+
+        canvas.style.display = 'block';
+        
+        const oldMsg = canvas.parentElement.querySelector('.no-weekly-msg');
+        if (oldMsg) oldMsg.remove();
+
+
+        if (this.charts.weekly) {
+            this.charts.weekly.destroy();
+        }
+
+        const labels = Object.keys(weekly);
+        const morning = labels.map(d => weekly[d].morning);
+        const afternoon = labels.map(d => weekly[d].afternoon);
+        const evening = labels.map(d => weekly[d].evening);
+
+        this.charts.weekly = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { label: 'Morning', data: morning, backgroundColor: '#FF9800' },
+                    { label: 'Afternoon', data: afternoon, backgroundColor: '#4CAF50' },
+                    { label: 'Evening', data: evening, backgroundColor: '#2196F3' }
+                ]
+            },
+            options: {
+                responsive: false,
+                scales: {
+                    x: { stacked: true },
+                    y: { stacked: true, beginAtZero: true }
+                }
+            }
+        });
+
+        console.log('AnalysisController: Weekly Chart.js rendered');
+
+    } catch (err) {
+        console.error('Error rendering Chart.js weekly chart', err);
     }
+}
+
     
     // Load peak hours chart
     async loadPeakHoursChart() {
-        try {
-            const peakData = await TTMS.fetchPeakHoursData();
-            
-            if (peakData.length === 0) {
-                console.warn('No peak hours data available');
+    try {
+        console.log('📊 Loading Peak Hours chart (role-based)');
+
+        const user = JSON.parse(localStorage.getItem('user'));
+        if (!user) {
+            console.warn('Peak hours: no user');
+            return;
+        }
+
+        let peakData = [];
+        let title = '';
+
+        // ================= STUDENT =================
+        if (user.role === 'student') {
+            console.log('👨‍🎓 Peak Study Hours for student');
+            peakData = await TTMS.fetchPeakStudyHoursForStudent(user);
+            title = 'Peak Study Hours (Student)';
+        }
+
+        // ================= LECTURER =================
+        else if (user.role === 'lecturer') {
+            console.log('👨‍🏫 Peak Teaching Hours for lecturer');
+            peakData = await TTMS.fetchPeakTeachingHoursForLecturer(user);
+            title = 'Peak Teaching Hours (Lecturer)';
+        }
+
+        else {
+            console.warn('Peak hours: unsupported role');
+            return;
+        }
+
+        if (!peakData || peakData.length === 0) {
+            console.warn('No peak hours data available');
+            return;
+        }
+
+        // FIND PEAK DAY + TIME
+        const peakSlot = peakData.reduce((max, curr) =>
+            curr.count > max.count ? curr : max,
+            peakData[0]
+        );
+
+        google.charts.setOnLoadCallback(() => {
+            const data = new google.visualization.DataTable();
+            data.addColumn('string', 'Time');
+            data.addColumn('number', 'Count');
+
+            peakData.forEach(item => {
+                data.addRow([item.hour, item.count]);
+            });
+
+            const options = {
+                title,
+                curveType: 'function',
+                backgroundColor: 'transparent',
+                hAxis: { title: 'Time' },
+                vAxis: { title: 'Number of Sessions', minValue: 0 },
+                chartArea: { width: '85%', height: '70%' },
+                colors: [user.role === 'student' ? '#1976D2' : '#D32F2F']
+            };
+
+            // 🔔 SHOW PEAK INFO ABOVE CHART
+const infoId = 'peakHoursInfo';
+let infoBox = document.getElementById(infoId);
+
+if (!infoBox) {
+    infoBox = document.createElement('div');
+    infoBox.id = infoId;
+    infoBox.style.textAlign = 'center';
+    infoBox.style.marginBottom = '10px';
+    infoBox.style.fontWeight = '600';
+    infoBox.style.color = '#444';
+
+    const chartContainer = document.getElementById('peakHoursChart');
+    if (chartContainer && chartContainer.parentElement) {
+        chartContainer.parentElement.insertBefore(infoBox, chartContainer);
+    }
+}
+
+infoBox.innerText =
+    `Peak time: ${peakSlot.day}, ${peakSlot.hour} (${peakSlot.count} classes)`;
+
+            const container = document.getElementById('peakHoursChart');
+            if (!container) {
+                console.error('peakHoursChart container not found');
                 return;
             }
-            
-            google.charts.setOnLoadCallback(() => {
-                const data = new google.visualization.DataTable();
-                data.addColumn('string', 'Time Slot');
-                data.addColumn('number', 'Session Count');
-                
-                peakData.forEach(item => {
-                    data.addRow([item.slot, item.count]);
-                });
-                
-                const options = {
-                    title: 'Peak Teaching Hours',
-                    curveType: 'function',
-                    colors: ['#D32F2F'],
-                    backgroundColor: 'transparent',
-                    hAxis: { title: 'Time Slot' },
-                    vAxis: { title: 'Number of Sessions', minValue: 0 },
-                    chartArea: { width: '85%', height: '70%' }
-                };
-                
-                const container = document.getElementById('peekHoursChart');
-                if (container) {
-                    const chart = new google.visualization.LineChart(container);
-                    chart.draw(data, options);
-                    this.charts.peak = chart;
-                }
-            });
-        } catch (error) {
-            console.error('Error loading peak hours chart:', error);
-        }
+
+            const chart = new google.visualization.ColumnChart(container);
+            chart.draw(data, options);
+            this.charts.peak = chart;
+        });
+
+    } catch (error) {
+        console.error('Error loading peak hours chart:', error);
     }
+}
+
+
     
     // Refresh all charts
     refreshAllCharts() {
