@@ -55,6 +55,10 @@ app.component("Dashboard", Dashboard);
 app.component("SessionFilter", SessionFilter);
 app.component("CourseList", CourseList);
 
-app.mount("#app");
+// Register components
+app.component("ClashDetection", ClashComponent);
+        
+// Mount the app
+app.mount('#app');
 
 console.log("✅ Vue app mounted (TTMS-consistent)");

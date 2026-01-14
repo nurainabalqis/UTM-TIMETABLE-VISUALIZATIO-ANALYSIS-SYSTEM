@@ -113,7 +113,7 @@
                     </h5>
                     <span class="badge badge-utm">This Session</span>
                 </div>
-                <canvas id="weeklyChart" style="height: 300px;"></canvas>
+                <div id="weeklyChart" style="height: 300px;"></div>
             </div>
         </div>
     </div>
@@ -129,26 +129,11 @@
                     </h5>
                     <span class="badge badge-utm">Time Analysis</span>
                 </div>
-                <div id="peakHoursChart" style="height: 300px;"></div>
+                <div id="peekHoursChart" style="height: 300px;"></div>
             </div>
         </div>
     </div>
     
-    <!-- Room Weekly Hours Chart (Hidden from students) -->
-    <div v-if="$parent.user.role !== 'student'" class="row mb-4">
-        <div class="col-12">
-            <div class="chart-container">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h5 class="mb-0">
-                        <i class="fas fa-door-open text-primary me-2"></i>
-                        Room Usage - Weekly Hours
-                    </h5>
-                    <span class="badge badge-utm">Top 15 Rooms</span>
-                </div>
-                <div id="roomWeeklyHoursChart" style="height: 350px;"></div>
-            </div>
-        </div>
-    </div>
     
     <!-- Quick Actions -->
     <div class="row">
@@ -219,8 +204,3 @@
         </div>
     </div>
 </div>
-
-
-
-
- 

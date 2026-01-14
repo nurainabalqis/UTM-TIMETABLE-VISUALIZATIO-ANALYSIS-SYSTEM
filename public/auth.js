@@ -1,16 +1,23 @@
-/*const auth = {
-user: null,
+// auth.js
+const auth = {
+  user: null,
 
+  async loadUser() {
+    try {
+      const res = await api.getCurrentUser();
+      this.user = res.data;
+      return this.user;
+    } catch (error) {
+      console.error('Error loading user:', error);
+      return null;
+    }
+  },
 
-async loadUser() {
-const res = await api.getCurrentUser();
-this.user = res.data;
-},
+  hasRole(role) {
+    return this.user && this.user.role === role;
+  },
 
-
-hasRole(role) {
-return this.user && this.user.role === role;
-}
+  isAuthenticated() {
+    return this.user !== null;
+  }
 };
-
-*/

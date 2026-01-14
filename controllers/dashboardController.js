@@ -14,7 +14,7 @@ const DashboardController = {
             const [courses, sessions, lecturers, rooms] = await Promise.all([
                 TTMS.fetchCourses(),
                 TTMS.fetchSessions(),
-                //TTMS.fetchLecturers(),
+                TTMS.fetchLecturers(),
                 TTMS.fetchRooms()
             ]);
             
@@ -261,13 +261,10 @@ const DashboardController = {
             // Load all charts with REAL data
             await Promise.all([
                 this.drawWorkloadChart(),
-                //this.drawWeeklyChart(),
+                this.drawWeeklyChart(),
                 this.drawPeakHoursChart(),
                 this.drawRoomWeeklyHoursChart()
             ]);
-
-            await this.drawWeeklyChartJS();
-
             
             console.log('Charts initialized with REAL data');
             
@@ -390,87 +387,82 @@ const DashboardController = {
         }
     },
     
-
-    //DARDARR
     // Draw weekly usage chart with REAL data
-    async drawWeeklyChartJS() {
-    try {
-        console.log('Drawing WEEKLY chart using Chart.js...');
-
-        
-        let canvas = null;
-        for (let i = 0; i < 10; i++) {
-            canvas = document.getElementById('weeklyChartJS');
-            if (canvas) break;
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-
-        if (!canvas) {
-            console.error('weeklyChartJS canvas NEVER appeared in DOM');
-            return;
-        }
-
-        console.log('Canvas found:', canvas);
-
-        
-        const user = JSON.parse(localStorage.getItem('user'));
-        if (!user) {
-            console.warn('No user found for weekly distribution');
-            return;
-        }
-
-        const weekly = await TTMS.fetchWeeklyDistributionForUser(user);
-
-        if (!weekly) {
-            console.warn('No weekly distribution data returned');
-            return;
-        }
-
-
-        if (this.weeklyChart) {
-            this.weeklyChart.destroy();
-        }
-
-        const labels = Object.keys(weekly);
-        const morning = labels.map(d => weekly[d].morning);
-        const afternoon = labels.map(d => weekly[d].afternoon);
-        const evening = labels.map(d => weekly[d].evening);
-
-       
-        this.weeklyChart = new Chart(canvas, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [
-                    { label: 'Morning', data: morning, backgroundColor: '#FF9800' },
-                    { label: 'Afternoon', data: afternoon, backgroundColor: '#4CAF50' },
-                    { label: 'Evening', data: evening, backgroundColor: '#2196F3' }
-                ]
-            },
-            options: {
-                responsive: false,
-                scales: {
-                    x: { stacked: true },
-                    y: { stacked: true, beginAtZero: true }
-                }
+    async drawWeeklyChart() {
+        try {
+            console.log('Drawing REAL weekly chart...');
+            const weeklyData = await TTMS.fetchWeeklyUsagePattern();
+            const container = document.getElementById('weeklyChart');
+            
+            if (!container) {
+                console.warn('Weekly chart container not found');
+                return;
             }
-        });
-
-        console.log('✅ Chart.js weekly chart drawn');
-
-    } catch (err) {
-        console.error('❌ ERROR drawing Chart.js weekly chart', err);
-    }
-},
-
-
+            
+            if (!weeklyData) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <i class="fas fa-calendar fa-2x text-muted mb-2"></i>
+                        <p class="text-muted">No schedule data available from TTMS</p>
+                        <small class="text-muted">TTMS may not have schedule data for current session</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            google.charts.setOnLoadCallback(() => {
+                const data = new google.visualization.DataTable();
+                data.addColumn('string', 'Day');
+                data.addColumn('number', 'Morning (8AM-12PM)');
+                data.addColumn('number', 'Afternoon (2PM-6PM)');
+                data.addColumn('number', 'Evening (6PM-10PM)');
+                
+                weeklyData.days.forEach((day, index) => {
+                    data.addRow([
+                        day,
+                        weeklyData.morning[index] || 0,
+                        weeklyData.afternoon[index] || 0,
+                        weeklyData.evening[index] || 0
+                    ]);
+                });
+                
+                const options = {
+                    title: 'Weekly Session Distribution (Real TTMS Data)',
+                    colors: ['#FF9800', '#4CAF50', '#2196F3'],
+                    backgroundColor: 'transparent',
+                    hAxis: { title: 'Day of Week' },
+                    vAxis: { title: 'Number of Sessions', minValue: 0 },
+                    chartArea: { width: '80%', height: '70%' },
+                    isStacked: true,
+                    legend: { position: 'top' }
+                };
+                
+                const chart = new google.visualization.ColumnChart(container);
+                chart.draw(data, options);
+                
+                console.log('REAL Weekly chart drawn');
+            });
+            
+        } catch (error) {
+            console.error('ERROR drawing REAL weekly chart:', error);
+            const container = document.getElementById('weeklyChart');
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Could not load weekly chart from TTMS
+                    </div>
+                `;
+            }
+        }
+    },
     
     // Draw peak hours chart with REAL data
     async drawPeakHoursChart() {
         try {
             console.log('Drawing REAL peak hours chart...');
             const peakData = await TTMS.fetchPeakHoursData();
-            const container = document.getElementById('peakHoursChart');
+            const container = document.getElementById('peekHoursChart');
             
             if (!container) {
                 console.warn('Peak hours chart container not found');
