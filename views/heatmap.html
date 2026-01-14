@@ -1,0 +1,671 @@
+<div>
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="text-dark mb-1">
+                <i class="fas fa-fire text-danger me-2"></i>
+                Timetable Heatmap
+            </h2>
+        </div>
+        <div>
+            <button class="btn btn-utm" @click="refreshHeatmap" :disabled="isLoading">
+                <i class="fas fa-sync-alt me-1" :class="{'fa-spin': isLoading}"></i>
+                Refresh
+            </button>
+        </div>
+    </div>
+    
+    <!-- Session Info -->
+    <div class="alert alert-info mb-4">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-info-circle me-2"></i>
+                <strong>Current Session:</strong> {{ $parent.currentSession.sesi }}-{{ $parent.currentSession.semester }}
+                <span class="ms-3">
+                    <i class="fas fa-clock me-1"></i>
+                    Time Blocks: 8AM-11AM • 11AM-2PM • 2PM-5PM
+                </span>
+            </div>
+            <div>
+                <span class="badge bg-light text-dark">Last update: {{ lastUpdated }}</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading State -->
+    <div v-if="isLoading" class="text-center py-5">
+        <div class="spinner-border text-danger" role="status"></div>
+        <p class="mt-3 text-muted">Loading timetable data from TTMS...</p>
+    </div>
+    
+    <!-- Heatmap Content -->
+    <div v-else>
+        <!-- Heatmap Card -->
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-fire me-2"></i>
+                    Campus Activity Heatmap
+                </h5>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-light" @click="viewMode = 'heatmap'" 
+                            :class="{'active': viewMode === 'heatmap'}">
+                        <i class="fas fa-fire"></i> Heatmap
+                    </button>
+                    <button class="btn btn-sm btn-light" @click="viewMode = 'table'" 
+                            :class="{'active': viewMode === 'table'}">
+                        <i class="fas fa-table"></i> Details
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Heatmap View -->
+            <div v-if="viewMode === 'heatmap'" class="card-body">
+                <!-- Heatmap Legend -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-success rounded me-2" style="width: 20px; height: 20px;"></div>
+                                <small class="text-muted">Free (0 class session)</small>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <div class="bg-warning rounded me-2" style="width: 20px; height: 20px;"></div>
+                                <small class="text-muted">Moderate (1-2 class sessions)</small>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <div class="bg-danger rounded me-2" style="width: 20px; height: 20px;"></div>
+                                <small class="text-muted">Busy (3+ class sessions)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Bootstrap Heatmap Grid -->
+                <div class="table-responsive">
+                    <table class="table table-bordered mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="text-center align-middle text-white" style="width: 120px;">
+                                    <small>Time Block</small>
+                                </th>
+                                <th v-for="day in days" :key="day.id" class="text-center align-middle text-white">
+                                    <small>{{ day.name }}</small>
+                                    <br>
+                                    <small class="text-muted">({{ day.malay }})</small>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="block in timeBlocks" :key="block.id">
+                                <td class="text-center bg-light align-middle">
+                                    <div class="fw-bold">{{ block.name }}</div>
+                                    <small class="text-muted">{{ block.timeRange }}</small>
+                                    <br>
+                                </td>
+                                <td v-for="day in days" :key="day.id" 
+                                    :class="getHeatmapCellClass(day.id, block.id)"
+                                    class="text-center align-middle heatmap-cell"
+                                    style="height: 90px; cursor: pointer;"
+                                    @click="showBlockDetails(day.id, block.id)"
+                                    :title="getCellTooltip(day.id, block.id)">
+                                    <div class="h-100 d-flex flex-column justify-content-center">
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Heatmap Notes -->
+                <div class="mt-3 text-center">
+                    <small class="text-muted">
+                        <i class="fas fa-mouse-pointer me-1"></i>
+                        Click on any time block to view class session details
+                    </small>
+                </div>
+            </div>
+            
+            <!-- Table View -->
+            <div v-else class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Day</th>
+                                <th>Time Block</th>
+                                <th>Status</th>
+                                <th>Class Sessions</th>
+                                <th>Unique Courses</th>
+                                <th>Rooms Used</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="blockInfo in allBlocks" :key="blockInfo.id">
+                                <td>
+                                    <span class="badge bg-dark">{{ blockInfo.dayName }}</span>
+                                </td>
+                                <td>
+                                    <div class="fw-bold">{{ blockInfo.blockName }}</div>
+                                    <small class="text-muted">{{ blockInfo.timeRange }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge" :class="blockInfo.statusClass">
+                                        {{ blockInfo.status }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <h5 class="mb-0" :class="blockInfo.taskCount > 5 ? 'text-danger' : blockInfo.taskCount > 2 ? 'text-warning' : 'text-success'">
+                                        {{ blockInfo.taskCount }}
+                                    </h5>
+                                    <small class="text-muted">sessions</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ blockInfo.uniqueCourses }}</span>
+                                </td>
+                                <td>
+                                    <div v-if="blockInfo.rooms.length > 0">
+                                        <span v-for="room in blockInfo.rooms.slice(0, 3)" :key="room" 
+                                              class="badge bg-light text-dark me-1 mb-1">
+                                            {{ room }}
+                                        </span>
+                                        <small v-if="blockInfo.rooms.length > 3" class="text-muted">
+                                            +{{ blockInfo.rooms.length - 3 }} more
+                                        </small>
+                                    </div>
+                                    <span v-else class="text-muted">-</span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" 
+                                            @click="showBlockDetails(blockInfo.dayId, blockInfo.blockId)">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Analysis Cards -->
+        <div class="row mb-4">
+            <!-- Peak Time Blocks to Avoid -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-danger text-white">
+                        <h6 class="mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Peak Time Block to Avoid
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div v-if="peakBlocks.length > 0">
+                            <div v-for="block in peakBlocks" :key="block.blockId" class="mb-3">
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-fire me-2"></i>
+                                    <strong>{{ block.blockName }} ({{ block.timeRange }})</strong>
+                                    is your busiest time!
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="text-center p-2 bg-light rounded">
+                                            <h4 class="text-danger mb-0">{{ block.totalSessions }}</h4>
+                                            <small class="text-muted">Total Sessions</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="text-center p-2 bg-light rounded">
+                                            <h4 class="text-danger mb-0">{{ block.daysUsed }}/5</h4>
+                                            <small class="text-muted">Days Used</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3">
+                                    <small class="text-muted d-block">
+                                        <i class="fas fa-calendar-day me-1"></i>
+                                        <strong>Busiest Day:</strong> {{ block.busiestDay }} ({{ block.busiestDaySessions }} sessions)
+                                    </small>
+                                    <small class="text-muted d-block mt-1">
+                                        <i class="fas fa-lightbulb me-1"></i>
+                                        <strong>Recommendation:</strong> {{ block.recommendation }}
+                                    </small>
+                                </div>
+                                
+                                <div class="progress mt-2" style="height: 10px;">
+                                    <div class="progress-bar bg-danger" 
+                                        :style="{width: block.utilization + '%'}"
+                                        :title="'Utilization: ' + block.utilization + '%'">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else class="text-center py-4">
+                            <i class="fas fa-check-circle fa-2x text-success mb-3"></i>
+                            <h6 class="text-success">No Peak Blocks Found!</h6>
+                            <p class="text-muted small mb-0">Your schedule is well distributed</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Best Time for Scheduling -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0">
+                            <i class="fas fa-calendar-check me-2"></i>
+                            Best Time Blocks for Scheduling
+                            <span class="badge bg-light text-success ms-2">{{ bestBlocks.length }} free</span>
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div v-if="bestBlocks.length > 0">
+                            <div class="mb-3">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Click on any time block to add your personal activities
+                                </small>
+                            </div>
+                            
+                            <div class="list-group list-group-flush">
+                                <div v-for="block in bestBlocks.slice(0, 5)" :key="block.id" 
+                                    class="list-group-item border-0 px-0 py-2">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <span class="badge bg-success me-2">{{ block.dayName.substring(0, 3) }}</span>
+                                            <strong>{{ block.blockName }}</strong>
+                                            <small class="text-muted d-block">{{ block.timeRange }}</small>
+                                        </div>
+                                        <div class="btn-group">
+                                            <button v-if="block.hasActivity" 
+                                                    class="btn btn-sm btn-outline-info"
+                                                    @click="openActivitiesListModal(block)">
+                                                <i class="fas fa-list-check"></i>
+                                                <span class="d-none d-md-inline ms-1">View</span>
+                                            </button>
+                                            <button class="btn btn-sm btn-success"
+                                                    @click="openActivityModal(block)">
+                                                <i class="fas fa-plus"></i>
+                                                <span class="d-none d-md-inline ms-1">Add Activity</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Show saved activities count -->
+                                    <div v-if="block.hasActivity" class="mt-2">
+                                        <span class="badge bg-light text-dark">
+                                            <i class="fas fa-tasks me-1"></i>
+                                            {{ block.personalActivities.length }} activity/ies saved
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div v-if="bestBlocks.length > 5" class="text-center mt-3">
+                                <small class="text-muted">
+                                    + {{ bestBlocks.length - 5 }} more free time blocks available
+                                </small>
+                            </div>
+                        </div>
+                        <div v-else class="text-center py-4">
+                            <i class="fas fa-calendar-times fa-2x text-warning mb-3"></i>
+                            <h6 class="text-warning">No Free Time Blocks</h6>
+                            <p class="text-muted small mb-0">Your schedule is fully booked</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Day-by-Day Analysis -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-chart-pie me-2"></i>
+                    Day-by-Day Analysis (Availability)
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div v-for="day in days" :key="day.id" class="col-md mb-3">
+                        <div class="card h-100" :class="getDayAvailabilityCardClass(day.id)">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">{{ day.name }}</h5>
+                                
+                                <!-- Availability Indicator -->
+                                <div class="d-flex justify-content-center align-items-center mb-3">
+                                    <div class="position-relative">
+                                        <!-- Circular progress using Bootstrap -->
+                                        <div class="position-relative d-inline-block">
+                                            <!-- Background circle -->
+                                            <div class="rounded-circle bg-light" 
+                                                style="width: 80px; height: 80px;"></div>
+                                            
+                                            <!-- Progress arc using border -->
+                                            <div class="position-absolute top-0 start-0 rounded-circle" 
+                                                :class="getDayAvailabilityProgressClass(day.id)"
+                                                :style="{
+                                                    width: '80px',
+                                                    height: '80px',
+                                                    borderWidth: '8px',
+                                                    borderStyle: 'solid',
+                                                    borderColor: getDayAvailabilityColor(day.id),
+                                                    clipPath: getDayProgressClipPath(day.id)
+                                                }">
+                                            </div>
+                                            
+                                            <!-- Percentage in center -->
+                                            <div class="position-absolute top-50 start-50 translate-middle">
+                                                <span class="fw-bold" :class="getDayAvailabilityTextClass(day.id)">
+                                                    {{ getDayAvailabilityPercentage(day.id) }}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Stats -->
+                                <div class="mb-3">
+                                    <span class="badge" :class="getDayAvailabilityBadgeClass(day.id)">
+                                        <i class="fas fa-clock me-1"></i>
+                                        {{ getDayFreeBlocks(day.id) }}/{{ timeBlocks.length }} free
+                                    </span>
+                                </div>
+                                
+                                <!-- Progress bar (Bootstrap built-in) -->
+                                <div class="progress mb-2" style="height: 8px;">
+                                    <div class="progress-bar" 
+                                        :class="getDayProgressBarClass(day.id)"
+                                        role="progressbar" 
+                                        :style="{width: getDayAvailabilityPercentage(day.id) + '%'}" 
+                                        :aria-valuenow="getDayAvailabilityPercentage(day.id)" 
+                                        aria-valuemin="0" 
+                                        aria-valuemax="100">
+                                    </div>
+                                </div>
+                                
+                                <!-- Details -->
+                                <div class="small">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="text-muted">
+                                            <i class="fas fa-chalkboard-teacher me-1"></i>
+                                            Sessions:
+                                        </span>
+                                        <span class="fw-bold">{{ getDayTotalSessions(day.id) }}</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="text-muted">
+                                            <i class="fas fa-book me-1"></i>
+                                            Courses:
+                                        </span>
+                                        <span class="fw-bold">{{ getDayUniqueCourses(day.id) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Card footer with status -->
+                            <div class="card-footer py-2 text-center" :class="getDayCardFooterClass(day.id)">
+                                <small class="fw-bold">
+                                    <i class="fas" :class="getDayAvailabilityIcon(day.id)"></i>
+                                    {{ getDayAvailabilityStatus(day.id) }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Legend with Bootstrap badges -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-success me-2">✓</span>
+                                <small class="text-muted">High Availability (≥ 70%)</small>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-warning me-2">!</span>
+                                <small class="text-muted">Moderate (40-69%)</small>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-danger me-2">✗</span>
+                                <small class="text-muted">Low Availability (< 40%)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Activity Modal -->
+    <div class="modal fade" id="activityModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-plus-circle me-2"></i>
+                        Add Personal Activity
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Adding activity for <strong>{{ selectedBlock.dayName }} - {{ selectedBlock.blockName }}</strong>
+                        <br>
+                        <small class="text-muted">{{ selectedBlock.timeRange }}</small>
+                    </div>
+                    
+                    <<form @submit.prevent="submitActivity" v-if="selectedBlock && selectedBlock.newActivity">
+                        <div class="mb-3">
+                            <label class="form-label">Activity Title *</label>
+                            <input type="text" class="form-control" 
+                                v-model="selectedBlock.newActivity.title"
+                                placeholder="e.g., Study Session, Group Meeting, Project Work"
+                                required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Description (Optional)</label>
+                            <textarea class="form-control" rows="2"
+                                    v-model="selectedBlock.newActivity.description"
+                                    placeholder="Add details about this activity..."></textarea>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Activity Type</label>
+                                <select class="form-select" v-model="selectedBlock.newActivity.type">
+                                    <option value="study">Study Session</option>
+                                    <option value="meeting">Group Meeting</option>
+                                    <option value="project">Project Work</option>
+                                    <option value="research">Research</option>
+                                    <option value="exercise">Exercise</option>
+                                    <option value="personal">Personal Time</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Priority</label>
+                                <select class="form-select" v-model="selectedBlock.newActivity.priority">
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-save me-2"></i>Save Activity
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Activities Modal -->
+    <div class="modal fade" id="activitiesListModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-tasks me-2"></i>
+                        Saved Activities - {{ selectedBlock.dayName }} {{ selectedBlock.blockName }}
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div v-if="selectedBlock.activities && selectedBlock.activities.length > 0">
+                        <div class="list-group">
+                            <div v-for="activity in selectedBlock.activities" :key="activity.id"
+                                class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <h6 class="mb-1">{{ activity.title }}</h6>
+                                        <p class="mb-1 small text-muted" v-if="activity.description">
+                                            {{ activity.description }}
+                                        </p>
+                                        <div class="mt-2">
+                                            <span class="badge me-2" :class="{
+                                                'bg-primary': activity.type === 'study',
+                                                'bg-success': activity.type === 'meeting',
+                                                'bg-warning': activity.type === 'project',
+                                                'bg-info': activity.type === 'research',
+                                                'bg-secondary': activity.type === 'exercise'
+                                            }">
+                                                {{ activity.type }}
+                                            </span>
+                                            <span class="badge" :class="{
+                                                'bg-danger': activity.priority === 'high',
+                                                'bg-warning': activity.priority === 'medium',
+                                                'bg-success': activity.priority === 'low'
+                                            }">
+                                                {{ activity.priority }} priority
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                            @click="deleteActivity(selectedBlock.id, activity.id)"
+                                            title="Delete activity">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                                <small class="text-muted">
+                                    <i class="far fa-clock me-1"></i>
+                                    Added {{ new Date(activity.createdAt).toLocaleDateString() }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-center py-4">
+                        <i class="fas fa-clipboard-list fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">No activities saved for this time block</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-success" @click="openActivityModal(selectedBlock)">
+                        <i class="fas fa-plus me-1"></i>Add New Activity
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Block Details Modal -->
+    <div class="modal fade" id="blockDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" :class="selectedBlock.isBusy ? 'bg-danger text-white' : selectedBlock.isModerate ? 'bg-warning text-dark' : 'bg-success text-white'">
+                    <h5 class="modal-title">
+                        <i class="fas" :class="selectedBlock.isBusy ? 'fa-exclamation-triangle' : selectedBlock.isModerate ? 'fa-info-circle' : 'fa-check-circle'"></i>
+                        {{ selectedBlock.dayName }} - {{ selectedBlock.blockName }}
+                    </h5>
+                    <button type="button" class="btn-close" :class="selectedBlock.isBusy || !selectedBlock.isModerate ? 'btn-close-white' : ''" 
+                            data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="alert" :class="selectedBlock.statusClass">
+                                <i class="fas" :class="selectedBlock.statusIcon"></i>
+                                <strong>{{ selectedBlock.statusText }}</strong>
+                                <br>
+                                {{ selectedBlock.taskCount }} class session(s) scheduled in this time block
+                            </div>
+                            
+                            <h6 class="mb-3">Class Sessions in this Block:</h6>
+                            <div class="row">
+                                <div v-for="session in selectedBlock.sessions" :key="session.id" class="col-md-6 mb-3">
+                                    <div class="card" :class="selectedBlock.cardBorderClass">
+                                        <div class="card-body">
+                                            <h6 class="card-title" :class="selectedBlock.cardTextClass">
+                                                {{ session.courseCode }}
+                                                <small class="text-muted">(Sec {{ session.section }})</small>
+                                            </h6>
+                                            <p class="card-text small mb-1">{{ session.courseName }}</p>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="badge bg-light text-dark">
+                                                    <i class="fas fa-clock me-1"></i>
+                                                    Slot {{ session.slot }}
+                                                </span>
+                                                <span class="badge bg-light text-dark">
+                                                    <i class="fas fa-door-closed me-1"></i>
+                                                    {{ session.room }}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h6 class="card-title">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Time Block Details
+                                    </h6>
+                                    <ul class="list-unstyled small">
+                                        <li class="mb-2">
+                                            <i class="fas fa-calendar-day me-2"></i>
+                                            <strong>Day:</strong> {{ selectedBlock.dayName }}
+                                        </li>
+                                        <li class="mb-2">
+                                            <i class="fas fa-clock me-2"></i>
+                                            <strong>Block:</strong> {{ selectedBlock.blockName }}
+                                        </li>
+                                        <li class="mb-2">
+                                            <i class="fas fa-calendar-alt me-2"></i>
+                                            <strong>Time:</strong> {{ selectedBlock.timeRange }}
+                                        </li>
+                                    </ul>
+                            
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                        <i class="fas fa-share-alt me-1"></i>
+                        Share Availability
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

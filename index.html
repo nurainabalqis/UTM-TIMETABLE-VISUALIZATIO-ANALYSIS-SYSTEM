@@ -286,6 +286,10 @@
                         <a class="nav-link" :class="{ active: currentView === 'utilization' }" href="#" @click.prevent="loadView('utilization')">
                             <i class="fas fa-door-open"></i> Room Utilization
                         </a>
+
+                        <a class="nav-link" :class="{ active: currentView === 'heatmap' }" href="#" @click.prevent="loadView('heatmap')">
+                            <i class="fas fa-exclamation-triangle"></i> Timetable Analysis
+                        </a>
                     </nav>
                     
                     <!-- Current Session Info -->
@@ -409,6 +413,9 @@
                                 break;
                             case 'timetable':
                                 await this.loadTimetable();
+                                break;
+                            case 'heatmap':
+                                await this.loadHeatmap();
                                 break;
                         }
                     } catch (error) {
@@ -886,7 +893,7 @@
                                 return Object.values(courses);
                             },
                         },
-                        
+
                         async mounted() {
                             await this.refreshTimetable();
                         },
@@ -1476,6 +1483,1070 @@
                             }
                         };
                     }
+                },
+
+                async loadHeatmap() {
+                    const response = await fetch('views/heatmap.html');
+                    const template = await response.text();
+                    
+                    this.components.heatmap = Vue.markRaw({
+                        template,
+                        data() {
+                            return {
+                                // Heatmap data
+                                viewMode: 'heatmap',
+                                isLoading: false,
+                                lastUpdated: 'Never',
+                                
+                                // Days data (Monday-Friday, matches TTMS days 2-6)
+                                days: [
+                                    { id: 2, name: 'Monday', malay: 'Isnin' },
+                                    { id: 3, name: 'Tuesday', malay: 'Selasa' },
+                                    { id: 4, name: 'Wednesday', malay: 'Rabu' },
+                                    { id: 5, name: 'Thursday', malay: 'Khamis' },
+                                    { id: 6, name: 'Friday', malay: 'Jumaat' }
+                                ],
+                                
+                                // Grouped time blocks (8AM-11AM, 11AM-2PM, 2PM-5PM)
+                                timeBlocks: [
+                                    { 
+                                        id: 'morning', 
+                                        name: 'Morning', 
+                                        timeRange: '8:00 AM - 11:00 AM',
+                                        slots: [2, 3, 4, 5], // TTMS slots 2-5 (8AM-11AM)
+                                        description: 'Morning classes'
+                                    },
+                                    { 
+                                        id: 'afternoon', 
+                                        name: 'Afternoon', 
+                                        timeRange: '11:00 AM - 2:00 PM',
+                                        slots: [5, 6, 7, 8], // TTMS slots 5-8 (11AM-2PM)
+                                        description: 'Afternoon classes'
+                                    },
+                                    { 
+                                        id: 'evening', 
+                                        name: 'Evening', 
+                                        timeRange: '2:00 PM - 5:00 PM',
+                                        slots: [8, 9, 10], // TTMS slots 8-10 (2PM-5PM)
+                                        description: 'Evening classes'
+                                    }
+                                ],
+                                
+                                // Personal timetable data
+                                myCourses: [],           // Your courses
+                                mySessions: [],          // Your class sessions
+                                blockData: {},           // Your schedule per block
+                                
+                                // Analysis data
+                                peakBlocks: [],    
+                                bestBlocks: [],      // Your busiest blocks
+                                freeBlocks: [],          // Your free blocks
+                                dayAnalysis: [],         // Day-by-day analysis
+                                
+                                // Selected block for modal
+                                selectedBlock: {
+                                    dayId: 0,
+                                    dayName: '',
+                                    blockId: '',
+                                    blockName: '',
+                                    timeRange: '',
+                                    isBusy: false,
+                                    sessions: []
+                                },
+                                
+                                // User info
+                                userName: '',
+                                userRole: ''
+                            };
+                        },
+                        async mounted() {
+                            await this.refreshHeatmap();
+                        },
+                        methods: {
+                            // ============ MAIN DATA FETCHING METHOD ============
+                            async refreshHeatmap() {
+                                this.isLoading = true;
+                                try {
+                                    console.log('🔥 Loading YOUR personal timetable for heatmap...');
+                                    
+                                    // Clear data
+                                    this.myCourses = [];
+                                    this.mySessions = [];
+                                    this.blockData = {};
+                                    this.peakBlocks = [];
+                                    this.freeBlocks = [];
+                                    this.dayAnalysis = [];
+                                    
+                                    // Get current user
+                                    const user = JSON.parse(localStorage.getItem('user'));
+                                    if (!user) {
+                                        this.$parent.showAlert('Please login first', 'warning');
+                                        this.isLoading = false;
+                                        return;
+                                    }
+                                    
+                                    this.userName = user.name || user.username;
+                                    this.userRole = user.role;
+                                    
+                                    console.log(`👤 Loading timetable for ${this.userName} (${this.userRole})`);
+                                    
+                                    // Initialize data structure
+                                    this.initializeDataStructure();
+                                    
+                                    // Fetch YOUR courses based on role
+                                    if (this.userRole === 'student') {
+                                        await this.loadStudentTimetable(user.username);
+                                    } else if (this.userRole === 'lecturer') {
+                                        await this.loadLecturerTimetable(user.username);
+                                    } else {
+                                        await this.loadAdminTimetable();
+                                    }
+                                    
+                                    // Process your sessions
+                                    this.processMySessions();
+                                    
+                                    // Calculate statistics
+                                    this.calculatePersonalStatistics();
+                                    
+                                    this.lastUpdated = new Date().toLocaleTimeString();
+                                    
+                                    this.$parent.showAlert(`Your timetable loaded: ${this.mySessions.length} class sessions`, 'success');
+                                    
+                                } catch (error) {
+                                    console.error('❌ Error loading personal timetable:', error);
+                                    this.$parent.showAlert('Failed to load your timetable: ' + error.message, 'danger');
+                                } finally {
+                                    this.isLoading = false;
+                                }
+                            },
+                            
+                            // ============ LOAD PERSONAL TIMETABLE ============
+                            async loadStudentTimetable(studentId) {
+                                try {
+                                    console.log(`🎓 Loading student timetable for ${studentId}`);
+                                    
+                                    // Get current session
+                                    const currentSession = this.$parent.currentSession || { sesi: '2025/2026', semester: '1' };
+                                    
+                                    // Fetch your enrolled courses
+                                    const myCourses = await TTMS.fetchMyCourses(studentId);
+                                    
+                                    if (!myCourses || myCourses.length === 0) {
+                                        console.log('No courses found for student');
+                                        return;
+                                    }
+                                    
+                                    console.log(`📚 Found ${myCourses.length} enrolled courses`);
+                                    
+                                    // Filter for current session
+                                    const currentCourses = myCourses.filter(course => 
+                                        course.sesi === currentSession.sesi && 
+                                        course.semester.toString() === currentSession.semester
+                                    );
+                                    
+                                    this.myCourses = currentCourses;
+                                    console.log(`📅 ${currentCourses.length} courses in current session`);
+                                    
+                                    // Get schedule for each course
+                                    for (const course of currentCourses) {
+                                        if (!course.kod_subjek) continue;
+                                        
+                                        try {
+                                            const schedule = await TTMS.fetchCourseSchedule(
+                                                course.kod_subjek,
+                                                currentSession.sesi,
+                                                currentSession.semester,
+                                                course.seksyen || null
+                                            );
+                                            
+                                            if (schedule && Array.isArray(schedule)) {
+                                                schedule.forEach(session => {
+                                                    this.mySessions.push({
+                                                        ...session,
+                                                        courseCode: course.kod_subjek,
+                                                        courseName: course.nama_subjek,
+                                                        section: course.seksyen || 'N/A'
+                                                    });
+                                                });
+                                            }
+                                        } catch (error) {
+                                            console.warn(`Could not fetch schedule for ${course.kod_subjek}:`, error);
+                                        }
+                                    }
+                                    
+                                } catch (error) {
+                                    console.error('Error loading student timetable:', error);
+                                    throw error;
+                                }
+                            },
+                            
+                            async loadLecturerTimetable(lecturerId) {
+                                try {
+                                    console.log(`👨‍🏫 Loading lecturer timetable for ${lecturerId}`);
+                                    
+                                    // Get current session
+                                    const currentSession = this.$parent.currentSession || { sesi: '2025/2026', semester: '1' };
+                                    
+                                    // Fetch lecturer's subjects
+                                    const lecturerSubjects = await TTMS.fetchLecturerSubjects(lecturerId);
+                                    
+                                    if (!lecturerSubjects || lecturerSubjects.length === 0) {
+                                        console.log('No subjects found for lecturer');
+                                        return;
+                                    }
+                                    
+                                    console.log(`📚 Found ${lecturerSubjects.length} teaching subjects`);
+                                    
+                                    // Filter for current session
+                                    const currentSubjects = lecturerSubjects.filter(subject => 
+                                        subject.sesi === currentSession.sesi && 
+                                        subject.semester.toString() === currentSession.semester
+                                    );
+                                    
+                                    this.myCourses = currentSubjects;
+                                    console.log(`📅 ${currentSubjects.length} subjects in current session`);
+                                    
+                                    // Get schedule for each subject
+                                    for (const subject of currentSubjects) {
+                                        if (!subject.kod_subjek) continue;
+                                        
+                                        try {
+                                            const schedule = await TTMS.fetchCourseSchedule(
+                                                subject.kod_subjek,
+                                                currentSession.sesi,
+                                                currentSession.semester,
+                                                subject.seksyen || null
+                                            );
+                                            
+                                            if (schedule && Array.isArray(schedule)) {
+                                                schedule.forEach(session => {
+                                                    this.mySessions.push({
+                                                        ...session,
+                                                        courseCode: subject.kod_subjek,
+                                                        courseName: subject.nama_subjek,
+                                                        section: subject.seksyen || 'N/A'
+                                                    });
+                                                });
+                                            }
+                                        } catch (error) {
+                                            console.warn(`Could not fetch schedule for ${subject.kod_subjek}:`, error);
+                                        }
+                                    }
+                                    
+                                } catch (error) {
+                                    console.error('Error loading lecturer timetable:', error);
+                                    throw error;
+                                }
+                            },
+                            
+                            async loadAdminTimetable() {
+                                // For admin, show personal schedule or default message
+                                console.log('👨‍💼 Admin view - showing minimal data');
+                                // You can customize this for admin
+                            },
+                            
+                            // ============ DATA STRUCTURE INITIALIZATION ============
+                            initializeDataStructure() {
+                                // Initialize block data structure
+                                this.blockData = {};
+                                
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        this.blockData[key] = {
+                                            sessions: [],
+                                            taskCount: 0
+                                        };
+                                    });
+                                });
+                            },
+                            
+                            // ============ PROCESS PERSONAL SESSIONS ============
+                            processMySessions() {
+                                console.log(`🔄 Processing ${this.mySessions.length} personal class sessions`);
+                                
+                                this.mySessions.forEach(session => {
+                                    const day = session.hari;   // TTMS day number (2-6)
+                                    const slot = session.masa;  // TTMS time slot (1-10)
+                                    
+                                    // Only process weekdays 2-6
+                                    if (day >= 2 && day <= 6) {
+                                        // Determine which block this slot belongs to
+                                        const blockId = this.getBlockForSlot(slot);
+                                        
+                                        if (blockId) {
+                                            const key = `${day}-${blockId}`;
+                                            
+                                            // Add session to block
+                                            this.blockData[key].sessions.push({
+                                                courseCode: session.courseCode,
+                                                courseName: session.courseName,
+                                                room: session.kod_bilik || (session.ruang ? session.ruang.kod_ruang : 'N/A'),
+                                                section: session.section,
+                                                slot: slot,
+                                                time: this.getTimeForSlot(slot)
+                                            });
+                                            
+                                            // Count as one task
+                                            this.blockData[key].taskCount++;
+                                        }
+                                    }
+                                });
+                            },
+                            
+                            getBlockForSlot(slot) {
+                                // Map TTMS slot to our time blocks
+                                if ([2, 3, 4, 5].includes(slot)) return 'morning';    // 8AM-11AM
+                                if ([5, 6, 7, 8].includes(slot)) return 'afternoon';  // 11AM-2PM
+                                if ([8, 9, 10].includes(slot)) return 'evening';      // 2PM-5PM
+                                return null; // Slot 1 (7AM) or other non-included slots
+                            },
+                            
+                            getTimeForSlot(slot) {
+                                // Convert TTMS slot to time string
+                                const slotTimes = {
+                                    1: '7:00 AM', 2: '8:00 AM', 3: '9:00 AM', 4: '10:00 AM', 5: '11:00 AM',
+                                    6: '12:00 PM', 7: '1:00 PM', 8: '2:00 PM', 9: '3:00 PM', 10: '4:00 PM'
+                                };
+                                return slotTimes[slot] || `Slot ${slot}`;
+                            },
+                            
+                            // ============ PERSONAL STATISTICS ============
+                            calculatePersonalStatistics() {
+                                console.log('📊 Calculating personal timetable statistics');
+                                
+                                // Find your busiest blocks
+                                this.findPersonalPeakBlocks();
+                                
+                                // Find your free blocks
+                                this.findPersonalFreeBlocks();
+                                
+                                // Calculate day-by-day analysis
+                                this.calculateDayAnalysis();
+                            },
+                            // ============ PEAK TIME BLOCKS ANALYSIS ============
+                            findPeakTimeBlocks() {
+                                console.log('🔍 Finding peak time blocks...');
+                                
+                                // Group by time block across all days
+                                const blockStats = {};
+                                
+                                // Initialize all time blocks
+                                this.timeBlocks.forEach(block => {
+                                    blockStats[block.id] = {
+                                        blockId: block.id,
+                                        blockName: block.name,
+                                        timeRange: block.timeRange,
+                                        totalSessions: 0,
+                                        daysUsed: 0,
+                                        dayDetails: {}
+                                    };
+                                });
+                                
+                                // Count sessions for each time block across all days
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        const taskCount = this.blockData[key]?.taskCount || 0;
+                                        
+                                        if (taskCount > 0) {
+                                            blockStats[block.id].totalSessions += taskCount;
+                                            blockStats[block.id].daysUsed++;
+                                            blockStats[block.id].dayDetails[day.name] = taskCount;
+                                        }
+                                    });
+                                });
+                                
+                                // Convert to array, filter out empty blocks, and sort
+                                const allBlocks = Object.values(blockStats)
+                                    .filter(block => block.totalSessions > 0)
+                                    .sort((a, b) => b.totalSessions - a.totalSessions);
+                                
+                                // Find the ABSOLUTE highest (peak)
+                                if (allBlocks.length > 0) {
+                                    const peakBlock = allBlocks[0]; // Highest total sessions
+                                    
+                                    // Find which day has the most sessions for this block
+                                    let busiestDay = '';
+                                    let maxDaySessions = 0;
+                                    
+                                    Object.entries(peakBlock.dayDetails).forEach(([dayName, sessions]) => {
+                                        if (sessions > maxDaySessions) {
+                                            maxDaySessions = sessions;
+                                            busiestDay = dayName;
+                                        }
+                                    });
+                                    
+                                    this.peakBlocks = [{
+                                        ...peakBlock,
+                                        busiestDay: busiestDay,
+                                        busiestDaySessions: maxDaySessions,
+                                        utilization: Math.round((peakBlock.daysUsed / this.days.length) * 100),
+                                        recommendation: this.getPeakRecommendation(peakBlock.totalSessions)
+                                    }];
+                                } else {
+                                    this.peakBlocks = [];
+                                }
+                                
+                                console.log('✅ Peak blocks identified:', this.peakBlocks);
+                            },
+                            
+                            getPeakRecommendation(totalSessions) {
+                                if (totalSessions >= 10) return 'Avoid at all costs - Extremely busy';
+                                if (totalSessions >= 6) return 'Try to avoid - Very busy';
+                                if (totalSessions >= 3) return 'Consider alternatives - Busy';
+                                return 'Moderately busy';
+                            },
+                            
+                            findPersonalPeakBlocks() {
+                                // Find blocks where YOU have the most classes
+                                const blockStats = [];
+                                
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        const taskCount = this.blockData[key].taskCount;
+                                        
+                                        if (taskCount > 0) {
+                                            blockStats.push({
+                                                dayId: day.id,
+                                                dayName: day.name,
+                                                blockId: block.id,
+                                                blockName: block.name,
+                                                timeRange: block.timeRange,
+                                                taskCount: taskCount,
+                                                sessions: this.blockData[key].sessions
+                                            });
+                                        }
+                                    });
+                                });
+                                
+                                // Sort by task count (descending) - your busiest blocks
+                                this.peakBlocks = blockStats.sort((a, b) => b.taskCount - a.taskCount).slice(0, 3);
+                            },
+
+                            // ============ BEST TIME FOR SCHEDULING ============
+                            findBestTimeBlocks() {
+                                console.log('📅 Finding best time blocks for scheduling...');
+                                
+                                const freeBlocks = [];
+                                
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        const taskCount = this.blockData[key]?.taskCount || 0;
+                                        
+                                        if (taskCount === 0) {
+                                            freeBlocks.push({
+                                                id: key,
+                                                dayId: day.id,
+                                                dayName: day.name,
+                                                blockId: block.id,
+                                                blockName: block.name,
+                                                timeRange: block.timeRange,
+                                                isFree: true,
+                                                personalActivities: this.getSavedActivities(key),
+                                                hasActivity: this.hasSavedActivity(key)
+                                            });
+                                        }
+                                    });
+                                });
+                                
+                                this.bestBlocks = freeBlocks.sort((a, b) => {
+                                    // Sort by day (Monday first) and time (morning first)
+                                    if (a.dayId !== b.dayId) return a.dayId - b.dayId;
+                                    
+                                    const blockOrder = { 'morning': 1, 'afternoon': 2, 'evening': 3 };
+                                    return blockOrder[a.blockId] - blockOrder[b.blockId];
+                                });
+                                
+                                console.log(`✅ Found ${this.bestBlocks.length} free time blocks`);
+                            },
+                            findPersonalFreeBlocks() {
+                                // Find blocks where YOU have no classes
+                                const freeBlocks = [];
+                                
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        const taskCount = this.blockData[key].taskCount;
+                                        
+                                        if (taskCount === 0) {
+                                            freeBlocks.push({
+                                                dayId: day.id,
+                                                dayName: day.name,
+                                                blockId: block.id,
+                                                blockName: block.name,
+                                                timeRange: block.timeRange,
+                                                isFree: true
+                                            });
+                                        }
+                                    });
+                                });
+                                
+                                this.freeBlocks = freeBlocks.slice(0, 6); // Show top 6 free blocks
+                            },
+
+                            // ============ PERSONAL ACTIVITIES MANAGEMENT ============
+                            getSavedActivities(blockKey) {
+                                try {
+                                    const saved = localStorage.getItem('personal_activities');
+                                    if (saved) {
+                                        const activities = JSON.parse(saved);
+                                        return activities[blockKey] || [];
+                                    }
+                                } catch (error) {
+                                    console.error('Error loading activities:', error);
+                                }
+                                return [];
+                            },
+                            
+                            hasSavedActivity(blockKey) {
+                                const activities = this.getSavedActivities(blockKey);
+                                return activities.length > 0;
+                            },
+                            
+                            saveActivity(blockKey, activity) {
+                                try {
+                                    const saved = localStorage.getItem('personal_activities') || '{}';
+                                    const activities = JSON.parse(saved);
+                                    
+                                    if (!activities[blockKey]) {
+                                        activities[blockKey] = [];
+                                    }
+                                    
+                                    // Add activity with timestamp
+                                    activities[blockKey].push({
+                                        ...activity,
+                                        id: Date.now(),
+                                        createdAt: new Date().toISOString()
+                                    });
+                                    
+                                    localStorage.setItem('personal_activities', JSON.stringify(activities));
+                                    
+                                    // Update the block data
+                                    const [dayId, blockId] = blockKey.split('-');
+                                    const block = this.bestBlocks.find(b => 
+                                        b.dayId.toString() === dayId && b.blockId === blockId
+                                    );
+                                    
+                                    if (block) {
+                                        block.personalActivities = activities[blockKey];
+                                        block.hasActivity = true;
+                                    }
+                                    
+                                    this.$parent.showAlert('Activity saved successfully!', 'success');
+                                    return true;
+                                    
+                                } catch (error) {
+                                    console.error('Error saving activity:', error);
+                                    this.$parent.showAlert('Failed to save activity', 'danger');
+                                    return false;
+                                }
+                            },
+                            
+                            deleteActivity(blockKey, activityId) {
+                                try {
+                                    const saved = localStorage.getItem('personal_activities');
+                                    if (saved) {
+                                        const activities = JSON.parse(saved);
+                                        
+                                        if (activities[blockKey]) {
+                                            activities[blockKey] = activities[blockKey].filter(
+                                                activity => activity.id !== activityId
+                                            );
+                                            
+                                            localStorage.setItem('personal_activities', JSON.stringify(activities));
+                                            
+                                            // Update the block data
+                                            const [dayId, blockId] = blockKey.split('-');
+                                            const block = this.bestBlocks.find(b => 
+                                                b.dayId.toString() === dayId && b.blockId === blockId
+                                            );
+                                            
+                                            if (block) {
+                                                block.personalActivities = activities[blockKey];
+                                                block.hasActivity = activities[blockKey].length > 0;
+                                            }
+                                            
+                                            this.$parent.showAlert('Activity deleted!', 'success');
+                                            return true;
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error('Error deleting activity:', error);
+                                    this.$parent.showAlert('Failed to delete activity', 'danger');
+                                    return false;
+                                }
+                            },
+                            
+                            // ============ MODAL METHODS ============
+                            openActivityModal(block) {
+                                // Make sure we have a valid block
+                                if (!block) {
+                                    console.error('No block provided to openActivityModal');
+                                    return;
+                                }
+                                
+                                this.selectedBlock = {
+                                    ...block,
+                                    id: block.id || `${block.dayId}-${block.blockId}`, // Ensure ID exists
+                                    modalType: 'activity',
+                                    newActivity: {
+                                        title: '',
+                                        description: '',
+                                        type: 'study',
+                                        priority: 'medium'
+                                    }
+                                };
+                                
+                                this.showModal('activityModal');
+                            },
+
+                            openActivitiesListModal(block) {
+                                if (!block) {
+                                    console.error('No block provided to openActivitiesListModal');
+                                    return;
+                                }
+                                
+                                this.selectedBlock = {
+                                    ...block,
+                                    id: block.id || `${block.dayId}-${block.blockId}`,
+                                    modalType: 'list',
+                                    activities: this.getSavedActivities(block.id) || []
+                                };
+                                
+                                this.showModal('activitiesListModal');
+                            },
+
+                            showModal(modalId) {
+                                const modalElement = document.getElementById(modalId);
+                                if (modalElement) {
+                                    const modal = new bootstrap.Modal(modalElement);
+                                    modal.show();
+                                }
+                            },
+
+                            submitActivity() {
+                                // DEFENSIVE CHECK - this is the most important fix
+                                if (!this.selectedBlock || !this.selectedBlock.newActivity) {
+                                    console.error('selectedBlock or newActivity is undefined');
+                                    this.$parent.showAlert('Form data is not properly initialized', 'error');
+                                    return;
+                                }
+                                
+                                if (!this.selectedBlock.newActivity.title.trim()) {
+                                    this.$parent.showAlert('Please enter a title for your activity', 'warning');
+                                    return;
+                                }
+                                
+                                // Ensure block has an ID
+                                const blockId = this.selectedBlock.id || `${this.selectedBlock.dayId}-${this.selectedBlock.blockId}`;
+                                
+                                const success = this.saveActivity(blockId, {
+                                    ...this.selectedBlock.newActivity,
+                                    id: Date.now().toString(), // Add unique ID
+                                    createdAt: new Date().toISOString(),
+                                    day: this.selectedBlock.dayName,
+                                    timeBlock: this.selectedBlock.blockName,
+                                    timeRange: this.selectedBlock.timeRange
+                                });
+                                
+                                if (success) {
+                                    // Reset form
+                                    this.selectedBlock.newActivity = {
+                                        title: '',
+                                        description: '',
+                                        type: 'study',
+                                        priority: 'medium'
+                                    };
+                                    
+                                    // Close modal
+                                    const modal = bootstrap.Modal.getInstance(document.getElementById('activityModal'));
+                                    if (modal) modal.hide();
+                                    
+                                    // Refresh the best blocks to show updated activity count
+                                    this.refreshBestBlocks();
+                                }
+                            },
+
+                            // Add initialization method
+                            initializeSelectedBlock() {
+                                this.selectedBlock = {
+                                    newActivity: {
+                                        title: '',
+                                        description: '',
+                                        type: 'study',
+                                        priority: 'medium'
+                                    },
+                                    id: '',
+                                    dayName: '',
+                                    blockName: '',
+                                    timeRange: ''
+                                };
+                            },
+
+                            refreshBestBlocks() {
+                                this.bestBlocks = this.bestBlocks.map(block => {
+                                    const activities = this.getSavedActivities(block.id);
+                                    return {
+                                        ...block,
+                                        hasActivity: activities && activities.length > 0,
+                                        personalActivities: activities || []
+                                    };
+                                });
+                            },
+
+                            // ============ DAY-BY-DAY ANALYSIS METHODS ============
+
+                            // Get number of free time blocks for a day
+                            getDayFreeBlocks(dayId) {
+                                let freeCount = 0;
+                                this.timeBlocks.forEach(block => {
+                                    if (this.getBlockTaskCount(dayId, block.id) === 0) {
+                                        freeCount++;
+                                    }
+                                });
+                                return freeCount;
+                            },
+
+                            // Calculate availability percentage for a day
+                            getDayAvailabilityPercentage(dayId) {
+                                const totalBlocks = this.timeBlocks.length;
+                                const freeBlocks = this.getDayFreeBlocks(dayId);
+                                return totalBlocks === 0 ? 0 : Math.round((freeBlocks / totalBlocks) * 100);
+                            },
+
+                            // Get card class based on availability
+                            getDayAvailabilityCardClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'border-success border-2';
+                                if (percentage >= 30) return 'border-warning border-2';
+                                return 'border-danger border-2';
+                            },
+
+                            // Get progress class for Bootstrap progress bar
+                            getDayProgressBarClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'bg-success';
+                                if (percentage >= 40) return 'bg-warning';
+                                return 'bg-danger';
+                            },
+
+                            // Get badge class
+                            getDayAvailabilityBadgeClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'bg-success';
+                                if (percentage >= 40) return 'bg-warning';
+                                return 'bg-danger';
+                            },
+
+                            // Get text color class for percentage
+                            getDayAvailabilityTextClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'text-success';
+                                if (percentage >= 40) return 'text-warning';
+                                return 'text-danger';
+                            },
+
+                            // Get color for circular progress
+                            getDayAvailabilityColor(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return '#28a745'; // Bootstrap success color
+                                if (percentage >= 40) return '#ffc107'; // Bootstrap warning color
+                                return '#dc3545'; // Bootstrap danger color
+                            },
+
+                            // Get progress class for circular progress
+                            getDayAvailabilityProgressClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'border-success';
+                                if (percentage >= 40) return 'border-warning';
+                                return 'border-danger';
+                            },
+
+                            // Create clip path for circular progress (alternative to CSS clip-path)
+                            getDayProgressClipPath(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                // Convert percentage to degrees (0-360)
+                                const degrees = (percentage / 100) * 360;
+                                
+                                if (percentage <= 50) {
+                                    return `polygon(50% 50%, 50% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, 50% 0%)`;
+                                } else {
+                                    return `polygon(50% 50%, 50% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, 0% 0%, 50% 0%)`;
+                                }
+                            },
+
+                            // Get card footer class
+                            getDayCardFooterClass(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'bg-success text-white';
+                                if (percentage >= 40) return 'bg-warning text-dark';
+                                return 'bg-danger text-white';
+                            },
+
+                            // Get status text
+                            getDayAvailabilityStatus(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'Mostly Free';
+                                if (percentage >= 40) return 'Moderate';
+                                return 'Mostly Busy';
+                            },
+
+                            // Get icon based on availability
+                            getDayAvailabilityIcon(dayId) {
+                                const percentage = this.getDayAvailabilityPercentage(dayId);
+                                if (percentage >= 70) return 'fa-check-circle';
+                                if (percentage >= 40) return 'fa-info-circle';
+                                return 'fa-exclamation-triangle';
+                            },
+
+                            // Get total sessions for a day (keep existing)
+                            getDayTotalSessions(dayId) {
+                                let total = 0;
+                                this.timeBlocks.forEach(block => {
+                                    total += this.getBlockTaskCount(dayId, block.id);
+                                });
+                                return total;
+                            },
+
+                            // Get unique courses for a day (keep existing)
+                            getDayUniqueCourses(dayId) {
+                                const courseSet = new Set();
+                                this.timeBlocks.forEach(block => {
+                                    const tasks = this.getBlockTasks(dayId, block.id);
+                                    tasks.forEach(task => {
+                                        if (task.courseCode) courseSet.add(task.courseCode);
+                                    });
+                                });
+                                return courseSet.size;
+                            },
+
+                            // ============ UPDATE CALCULATE STATISTICS ============
+                            calculatePersonalStatistics() {
+                                console.log('📊 Calculating personal timetable statistics');
+                                
+                                // Find peak time blocks
+                                this.findPeakTimeBlocks();
+                                
+                                // Find best time blocks for scheduling
+                                this.findBestTimeBlocks();
+                                
+                                // Calculate day-by-day analysis
+                                this.calculateDayAnalysis();
+                            },
+                            
+                            // ============ INITIALIZATION ============
+                            initializeDataStructure() {
+                                // Initialize block data structure
+                                this.blockData = {};
+                                
+                                this.days.forEach(day => {
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        this.blockData[key] = {
+                                            sessions: [],
+                                            taskCount: 0
+                                        };
+                                    });
+                                });
+                                
+                                // Initialize selected block
+                                this.selectedBlock = {
+                                    id: '',
+                                    dayId: 0,
+                                    dayName: '',
+                                    blockId: '',
+                                    blockName: '',
+                                    timeRange: '',
+                                    modalType: '',
+                                    newActivity: {
+                                        title: '',
+                                        description: '',
+                                        type: 'study',
+                                        priority: 'medium'
+                                    },
+                                    activities: []
+                                };
+                            },
+
+                            
+                            calculateDayAnalysis() {
+                                // Calculate statistics for each day
+                                this.dayAnalysis = this.days.map(day => {
+                                    let totalSessions = 0;
+                                    let totalHours = 0;
+                                    
+                                    this.timeBlocks.forEach(block => {
+                                        const key = `${day.id}-${block.id}`;
+                                        totalSessions += this.blockData[key].taskCount;
+                                        // Estimate hours: each session is ~1 hour
+                                        totalHours += this.blockData[key].taskCount;
+                                    });
+                                    
+                                    const utilization = Math.min(100, Math.round((totalSessions / 9) * 100)); // Max 9 sessions possible
+                                    
+                                    return {
+                                        dayId: day.id,
+                                        dayName: day.name,
+                                        totalSessions: totalSessions,
+                                        totalHours: totalHours,
+                                        utilization: utilization,
+                                        status: totalSessions === 0 ? 'Free' : totalSessions <= 3 ? 'Light' : totalSessions <= 6 ? 'Medium' : 'Heavy'
+                                    };
+                                });
+                            },
+                            
+                            // ============ HEATMAP HELPER METHODS ============
+                            getBlockTaskCount(day, blockId) {
+                                const key = `${day}-${blockId}`;
+                                return this.blockData[key]?.taskCount || 0;
+                            },
+                            
+                            getBlockSessions(day, blockId) {
+                                const key = `${day}-${blockId}`;
+                                return this.blockData[key]?.sessions || [];
+                            },
+                            
+                            getHeatmapCellClass(day, blockId) {
+                                const taskCount = this.getBlockTaskCount(day, blockId);
+                                
+                                if (taskCount === 0){
+                                    return 'bg-success';// Green for free (no classes)
+                                } else if (taskCount === 1 || taskCount === 2){
+                                    return 'bg-warning text-dark';// Yellow for 2 classes
+                                }else {
+                                    return 'bg-danger';  // Red for 3+ classes
+                                }                                                                       
+                            },
+                            
+                            getOccupancyBadgeClass(day, blockId) {
+                                const taskCount = this.getBlockTaskCount(day, blockId);
+                                if (taskCount <= 2) return 'bg-dark text-white';
+                                return 'bg-light text-dark';
+                            },
+                            
+                            getCellTooltip(day, blockId) {
+                                const taskCount = this.getBlockTaskCount(day, blockId);
+                                const dayName = this.days.find(d => d.id === day)?.name || 'Day ' + day;
+                                const block = this.timeBlocks.find(b => b.id === blockId);
+                                const timeRange = block ? block.timeRange : '';
+                                
+                                if (taskCount === 0) {
+                                    return `${dayName} ${timeRange}: You have no classes`;
+                                } else if (taskCount === 1) {
+                                    return `${dayName} ${timeRange}: You have 1 class`;
+                                } else if (taskCount === 2) {
+                                    return `${dayName} ${timeRange}: You have 2 classes`;
+                                } else {
+                                    return `${dayName} ${timeRange}: You have ${taskCount} classes (Busy!)`;
+                                }
+                            },
+                            
+                            // ============ BLOCK DETAILS MODAL ============
+                            showBlockDetails(day, blockId) {
+                                const dayObj = this.days.find(d => d.id === day);
+                                const blockObj = this.timeBlocks.find(b => b.id === blockId);
+                                const key = `${day}-${blockId}`;
+                                const data = this.blockData[key];
+                                
+                                const taskCount = data?.taskCount || 0;
+                                const sessions = data?.sessions || [];
+                                
+                                this.selectedBlock = {
+                                    dayId: day,
+                                    dayName: dayObj ? dayObj.name : 'Day ' + day,
+                                    blockId: blockId,
+                                    blockName: blockObj ? blockObj.name : 'Block ' + blockId,
+                                    timeRange: blockObj ? blockObj.timeRange : '',
+                                    isBusy: taskCount > 0,
+                                    sessions: sessions
+                                };
+                                
+                                // Show modal using Bootstrap
+                                const modalElement = document.getElementById('blockDetailsModal');
+                                if (modalElement) {
+                                    const modal = new bootstrap.Modal(modalElement);
+                                    modal.show();
+                                }
+                            },
+                            
+                            // ============ DAY ANALYSIS GETTERS ============
+                            getDaySessionUtilization(dayId) {
+                                const maxPossibleSessions = this.timeBlocks.length * 6; // Assuming max 6 sessions per block
+                                const actualSessions = this.getDayTotalSessions(dayId);
+                                return Math.min(100, Math.round((actualSessions / maxPossibleSessions) * 100));
+                            },
+
+                            getDayTotalSessions(dayId) {
+                                let total = 0;
+                                this.timeBlocks.forEach(block => {
+                                    const key = `${dayId}-${block.id}`;
+                                    total += this.blockData[key]?.taskCount || 0;
+                                });
+                                return total;
+                            },
+
+                            getDayUniqueCourses(dayId) {
+                                let uniqueCourses = new Set();
+                                this.timeBlocks.forEach(block => {
+                                    const key = `${dayId}-${block.id}`;
+                                    const sessions = this.blockData[key]?.sessions || [];
+                                    sessions.forEach(session => {
+                                        uniqueCourses.add(session.courseCode);
+                                    });
+                                });
+                                return uniqueCourses.size;
+                            },
+
+                            getUniqueCourses(day, blockId) {
+                                const key = `${day}-${blockId}`;
+                                const sessions = this.blockData[key]?.sessions || [];
+                                const uniqueCourses = new Set();
+                                sessions.forEach(session => {
+                                    uniqueCourses.add(session.courseCode);
+                                });
+                                return uniqueCourses.size;
+                            },
+                            
+                            getDayCardClass(dayId) {
+                                const sessions = this.getDayTotalSessions(dayId);
+                                if (sessions === 0) return 'border-success';
+                                if (sessions <= 2) return 'border-info';
+                                if (sessions <= 4) return 'border-warning';
+                                return 'border-danger';
+                            },
+                            
+                            getDayBadgeClass(dayId) {
+                                const sessions = this.getDayTotalSessions(dayId);
+                                if (sessions === 0) return 'bg-success';
+                                if (sessions <= 2) return 'bg-info';
+                                if (sessions <= 4) return 'bg-warning';
+                                return 'bg-danger';
+                            },
+                            
+                            getDayProgressClass(dayId) {
+                                const sessions = this.getDayTotalSessions(dayId);
+                                if (sessions === 0) return 'bg-success';
+                                if (sessions <= 2) return 'bg-info';
+                                if (sessions <= 4) return 'bg-warning';
+                                return 'bg-danger';
+                            },
+                            
+                            // ============ VIEW TOGGLE ============
+                            toggleViewMode() {
+                                this.viewMode = this.viewMode === 'heatmap' ? 'table' : 'heatmap';
+                            },
+                            
+                            // ============ FORMATTING HELPERS ============
+                            formatRole() {
+                                if (this.userRole === 'student') return 'Student';
+                                if (this.userRole === 'lecturer') return 'Lecturer';
+                                return this.userRole;
+                            }
+                        }
+                    });
                 },
                 
                 showAlert(message, type = 'info') {
