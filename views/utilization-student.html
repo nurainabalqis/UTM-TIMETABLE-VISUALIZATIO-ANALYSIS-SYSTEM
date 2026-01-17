@@ -16,14 +16,31 @@
     
     
     <!-- Quick Room Search -->
-    <div class="card">
+    <div class="card mb-5">
         <div class="card-header">
-            <h5 class="mb-0"><i class="fas fa-search me-2"></i>Find Available Study Spaces</h5>
+            <h5 class="mb-0">
+                <i class="fas fa-search me-2"></i>Find Available Study Spaces</h5>
         </div>
+
         <div class="card-body">
-            <div class="row g-3">
+            <div class="row g-3 align-items-end">
+
+                 <!-- DAY -->
                 <div class="col-md-4">
-                    <label class="form-label">Preferred Time</label>
+                    <label class="form-label fw-semibold">Day</label>
+                    <select class="form-select" v-model="searchDay">
+                        <option value="">Any Day</option>
+                        <option value="2">Monday</option>
+                        <option value="3">Tuesday</option>
+                        <option value="4">Wednesday</option>
+                        <option value="5">Thursday</option>
+                        <option value="6">Friday</option>
+                    </select>
+                </div>
+
+                <!-- TIME -->
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Preferred Time</label>
                     <select class="form-select" v-model="searchTime">
                         <option value="">Any Time</option>
                         <option value="morning">Morning (8 AM - 12 PM)</option>
@@ -31,25 +48,80 @@
                         <option value="evening">Evening (6 PM - 10 PM)</option>
                     </select>
                 </div>
+
+                <!-- TYPE -->
                 <div class="col-md-4">
-                    <label class="form-label">Room Type</label>
+                    <label class="form-label fw-semibold">Room Type</label>
                     <select class="form-select" v-model="searchType">
                         <option value="">Any Type</option>
-                        <option value="Lecture Hall">Lecture Hall</option>
-                        <option value="Classroom">Classroom</option>
-                        <option value="Laboratory">Laboratory</option>
-                        <option value="Student Lounge">Student Lounge</option>
+                        <option value="bilik">Bilik Kuliah</option>
+                        <option value="makmal">Makmal</option>
+                        <option value="dewan">Dewan</option>
+                        <option value="others">Others</option>
                     </select>
                 </div>
-                <div class="col-md-4 d-flex align-items-end">
-                    <button class="btn btn-utm w-100" @click="searchAvailableRooms">
-                        <i class="fas fa-search me-2"></i>Find Spaces
+
+                <!-- BUTTON -->
+                <div class="d-flex justify-content-center mt-4">
+                    <button 
+                        class="btn btn-success px-5 py-2" 
+                        @click="searchAvailableRooms" 
+                        :disabled="isSearching"
+                    >
+                        <span v-if="!isSearching">
+                            <i class="bi bi-search me-2"></i>Find Spaces
+                        </span>
+                        <span v-else>
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                            Searching...
+                        </span>
                     </button>
                 </div>
             </div>
+
+            <!-- STATUS MESSAGE -->
+            <div class="text-center mt-3">
+                <small v-if="!isSearching && availableRooms.length === 0 && searched"
+                    class="text-muted">
+                    No available rooms found for the selected criteria.
+                </small>
+            </div>
         </div>
     </div>
-</div>
+
+    <!-- Search Results -->
+    <div class="mb-5">
+
+        <!-- When results exist -->
+        <div v-if="availableRooms.length">
+            <h5 class="mb-3">
+                <i class="fas fa-door-open me-2"></i>
+                Available Study Spaces
+            </h5>
+
+            <ul class="list-group">
+                <li
+                    v-for="room in availableRooms"
+                    :key="room.kod_ruang"
+                    class="list-group-item d-flex justify-content-between align-items-center"
+                >
+                    <div>
+                        <strong>{{ room.nama_ruang }}</strong>
+                        <div class="text-muted small">
+                            {{ room.kod_ruang }} · {{ room.jenis }}
+                        </div>
+                    </div>
+
+                    <span
+                        class="badge building-badge"
+                        :class="room.kod_ruang.startsWith('N28A') ? 'n28a' : 'n28'"
+                    >
+                        {{ room.kod_ruang.startsWith('N28A') ? 'N28A' : 'N28' }}
+                    </span>
+                </li>
+            </ul>
+        </div>
+    </div>
 
 
     <!-- Room Type Distribution -->
@@ -75,5 +147,34 @@
                 </div>
             </div>
         </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-building me-2"></i>
+                    N28 – Room Types
+                </div>
+                <div class="card-body">
+                    <canvas id="n28TypeChart" height="220"></canvas>
+                    <div id="n28RoomList" class="mt-3"></div>
+                </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-building me-2"></i>
+                    N28A – Room Types
+                </div>
+                <div class="card-body">
+                    <canvas id="n28aTypeChart" height="220"></canvas>
+                    <div id="n28aRoomList" class="mt-3"></div>
+                </div>
+                </div>
+            </div>
+        </div>
+
     </div>
-    
+</div>   

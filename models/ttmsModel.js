@@ -684,16 +684,22 @@ const TTMS = {
 
     async fetchRoomUtilizationAnalysis() {
         try {
-            const rooms = await this.fetchRooms();
+            const allRooms = await this.fetchRooms();
             const courses = await this.fetchCourses();
+
+            const fcRooms = allRooms.filter(r => {
+                const building = this.getBuildingFromRoomCode(r.kod_ruang);
+                return building === 'N28' || building === "N28A";
+            });
 
             const roomUsageMap = {};
 
             // Initialize rooms
-            rooms.forEach(r => {
+            fcRooms.forEach(r => {
                 roomUsageMap[r.kod_ruang] = {
                     code: r.kod_ruang,
                     name: r.nama_ruang,
+                    building: this.getBuildingFromRoomCode(r.kod_ruang),
                     type: r.jenis || r.jenis_ruang || 'Classroom',
                     capacity: parseInt(r.kapasiti) || 0,
                     usageHours: 0,
@@ -727,6 +733,25 @@ const TTMS = {
             if (r.capacity < 40) capacityDistribution.small++;
             else if (r.capacity < 80) capacityDistribution.medium++;
             else capacityDistribution.large++;
+            });
+
+            // ================= ROOM TYPE DISTRIBUTION BY BUILDING =================
+            const roomTypeByBuilding = {
+                N28: {},
+                N28A: {}
+            };
+
+            detailedRooms.forEach(r => {
+                if (!r.building) return;
+
+                const building = r.building;
+                const type = r.type || 'Unknown';
+
+                if (!roomTypeByBuilding[building][type]) {
+                    roomTypeByBuilding[building][type] = 0;
+                }
+
+                roomTypeByBuilding[building][type]++;
             });
 
             return {
@@ -764,7 +789,8 @@ const TTMS = {
                     usageHours: r.usageHours,
                     subjectCount: r.subjectCount
                 })),
-                peakHoursData: [] // optional for now
+                peakHoursData: [], // optional for now
+                roomTypeByBuilding
             }
             };
 
@@ -1066,9 +1092,90 @@ const TTMS = {
         }
     },
 
-    
+    async fetchAvailableStudySpaces({ day = '', timeBlock = '', roomType = '' }) {
+        const MASA_TO_HOUR = {
+            1: 7, 2: 8, 3: 9, 4: 10, 5: 11,
+            6: 12, 7: 13, 8: 14, 9: 15, 10: 16
+        };
+
+        const { sesi, semester } = this.getCurrentSession();
+
+        // 1. Get all rooms
+        const allRooms = await this.fetchRooms();
+
+        // 2. Filter to N28 & N28A only
+        const fcRooms = allRooms.filter(r => {
+            const building = this.getBuildingFromRoomCode(r.kod_ruang);
+            return building === 'N28' || building === 'N28A';
+        });
+
+        // 3. Filter by room type (if selected)
+        const filteredRooms = roomType
+            ? fcRooms.filter(r => {
+            const jenis = (r.jenis || '').toLowerCase();
+
+            if (roomType === 'others') {
+                return !jenis;
+            }
+
+            return jenis.includes(roomType);
+        })
+        : fcRooms;
+
+        const availableRooms = [];
+
+        // 4. Check schedule for each room
+        for (const room of filteredRooms) {
+
+            let schedule = await this.fetchWithAdminSession('jadual_ruang', {
+                kod_ruang: room.kod_ruang,
+                sesi,
+                semester
+            });
+
+            // If no schedule → available all day
+            if (!Array.isArray(schedule) || schedule.length === 0) {
+                availableRooms.push(room);
+                continue;
+            }
+
+            // FILTER BY DAY
+            if (day) {
+                schedule = schedule.filter(s => String(s.hari) === String(day));
+            }
+
+            // Check conflict by time block
+            const hasConflict = timeBlock
+                ? schedule.some(slot => {
+                    const hour = slot.masa ? MASA_TO_HOUR[slot.masa] : null;
+                    if (!hour) return false;
+
+                    if (timeBlock === 'morning') return hour >= 8 && hour < 12;
+                    if (timeBlock === 'afternoon') return hour >= 12 && hour < 18;
+                    if (timeBlock === 'evening') return hour >= 18;
+
+                    return false;
+                })
+                : false; // ✅ no conflict when "Any Time"
+
+            if (!hasConflict) {
+                availableRooms.push(room);
+            }
+        }
+
+        return availableRooms;
+    },
 
     // ============ HELPER FUNCTIONS ============
+// Building derivation from room code
+getBuildingFromRoomCode(kod_ruang) {
+    if (!kod_ruang) return null;
+
+    if (kod_ruang.startsWith('N28A')) return 'N28A';
+    if (kod_ruang.startsWith('N28')) return 'N28';
+
+    return null;
+},
 
 // Convert TTMS day number to English day name
 getDayNameFromHari(dayNumber) {
@@ -1278,6 +1385,8 @@ parseTTMSResponse(text, entity) {
             return [];
         }
     },
+
+
 
     // ============ CLASH DETECTION ============
     

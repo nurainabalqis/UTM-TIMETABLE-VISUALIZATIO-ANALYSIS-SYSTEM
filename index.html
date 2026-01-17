@@ -197,6 +197,24 @@
                 margin-bottom: 15px;
             }
         }
+
+        .building-badge {
+            font-size: 0.85rem;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        /* N28 – Faculty Core */
+        .building-badge.n28 {
+            background-color: #1E88E5; /* Blue */
+        }
+
+        /* N28A – Annex */
+        .building-badge.n28a {
+            background-color: #FB8C00; /* Orange */
+        }
     </style>
 </head>
 <body>
@@ -352,15 +370,23 @@
         const app = createApp({
             data() {
                 return {
+                    // User info
                     user: {
                         name: '',
                         username: '',
                         role: ''
                     },
+
+                    // Navigation
                     currentView: 'dashboard',
                     loading: false,
+
+                    // Session
                     currentSession: { sesi: '2025/2026', semester: '1' },
+                    
+                    // Alerts
                     alerts: [],
+
                     // Dynamic components
                     components: {
                         dashboard: null,
@@ -1307,21 +1333,27 @@
                             data() {
                                 return {
                                     myRoomData: [],
+                                    searchDay: '',
                                     searchTime: '',
                                     searchType: '',
-                                    isLoading: true
+                                    availableRooms: [],
+                                    isSearching: false,
+                                    searched: false
                                 };
                             },
                             async mounted() {
                                 await this.loadStudentData();
                                 // Initialize charts if RoomController exists
-                                if (window.RoomController) {
-                                    try {
-                                        await RoomController.drawRoomUtilizationDashboard();
-                                    } catch (error) {
-                                        console.error('Error drawing charts:', error);
+                                this.$nextTick(async () => {
+                                    if (window.RoomController) {
+                                        try {
+                                            await RoomController.drawRoomUtilizationDashboard();
+                                        } catch (error) {
+                                            console.error('Error drawing charts:', error);
+                                        }
                                     }
-                                }
+                                });
+                                
                             },
                             methods: {
                                 async loadStudentData() {
@@ -1346,8 +1378,6 @@
                                                 building: this.getBuildingFromRoomCode(course.kod_bilik),
                                                 capacity: course.bil_pelajar || 'N/A'
                                             }));
-                                            
-                                        this.$parent.showAlert(`Found ${this.myRoomData.length} rooms for your courses`, 'success');
                                     } catch (error) {
                                         console.error('Error loading student room data:', error);
                                         this.$parent.showAlert('Failed to load room data', 'danger');
@@ -1363,11 +1393,27 @@
                                     if (roomCode.startsWith('DK')) return 'Lecture Hall';
                                     return 'Main Building';
                                 },
-                                searchAvailableRooms() {
-                                    this.$parent.showAlert(
-                                        `Searching for ${this.searchType || 'any type'} rooms during ${this.searchTime || 'any time'}`, 
-                                        'info'
-                                    );
+
+                                async searchAvailableRooms() {
+                                        this.isSearching = true;
+                                        this.searched = true;
+                                        this.availableRooms = [];
+
+                                        try {
+                                            const rooms = await TTMS.fetchAvailableStudySpaces ({
+                                                day: this.searchDay,
+                                                timeBlock: this.searchTime,
+                                                roomType: this.searchType
+                                            });
+
+                                            this.availableRooms = rooms;
+                                        } catch (err) {
+                                            console.error('Search available rooms failed:', err);
+                                            this.availableRooms = [];
+                                        } finally {
+                                            this.isSearching = false;
+                                            this.searched = true;
+                                    }
                                 }
                             }
                         };

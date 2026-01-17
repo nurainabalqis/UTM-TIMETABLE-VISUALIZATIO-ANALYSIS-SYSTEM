@@ -25,12 +25,26 @@ const RoomController = {
                 return;
             }
 
+            const rooms = await TTMS.fetchRooms();
+
             await Promise.all([
                 this.drawRoomTypeChart(analysis.charts.roomTypeDistribution),
-                this.drawUsageLevelChart(analysis.charts.usageLevelDistribution),
                 this.drawTopRoomsChart(analysis.charts.topRoomsByUsage),
                 this.drawCapacityChart(analysis.charts.capacityDistribution),
-                this.drawPeakHoursChart(analysis.charts.peakHoursData)
+                this.drawPeakHoursChart(analysis.charts.peakHoursData),
+                this.drawRoomTypeChartByBuilding(
+                'n28TypeChart',
+                    'n28RoomList',
+                    rooms,
+                    'N28'
+                ),
+
+                this.drawRoomTypeChartByBuilding(
+                    'n28aTypeChart',
+                    'n28aRoomList',
+                    rooms,
+                    'N28A'
+                )
             ]);
         
             console.log('✅ Room utilization dashboard drawn');
@@ -291,6 +305,80 @@ const RoomController = {
             });
         });
     },
+
+    drawRoomTypeChartByBuilding(canvasId, listId, rooms, building) {
+        const canvas = document.getElementById(canvasId);
+        const list = document.getElementById(listId);
+        if (!canvas || !list) return;
+
+        const filtered = rooms.filter(r =>
+            TTMS.getBuildingFromRoomCode(r.kod_ruang) === building
+        );
+
+        const grouped = {};
+        filtered.forEach(r => {
+            const type = r.jenis || 'Others';
+            grouped[type] = grouped[type] || [];
+            grouped[type].push(r);
+        });
+
+        const labels = Object.keys(grouped);
+        const counts = labels.map(l => grouped[l].length);
+
+        const chart = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Number of Rooms',
+                    data: counts,
+                    backgroundColor: '#4CAF50'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                onClick: (_, elements) => {
+                    if (!elements.length) return;
+                    const idx = elements[0].index;
+                    const type = labels[idx];
+
+                    list.innerHTML = `
+                        <strong>${type} (${grouped[type].length})</strong>
+                        <ul class="mt-2">
+                            ${grouped[type]
+                                .map(r => `<li>${r.nama_ruang}</li>`)
+                                .join('')}
+                        </ul>
+                    `;
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
+                }
+            }
+        });
+    },
+
+    renderRoomList(containerId, rooms, type, building) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.innerHTML = `
+            <h6 class="mb-2">
+                ${type} in ${building} (${rooms.length})
+            </h6>
+            <ul class="list-group">
+                ${rooms.map(r => `
+                    <li class="list-group-item d-flex justify-content-between">
+                        ${r.nama_ruang}
+                        <span class="badge bg-secondary">
+                            ${r.kod_ruang}
+                        </span>
+                    </li>
+                `).join('')}
+            </ul>
+        `;
+    },
     
     // View room details
     async viewRoomDetails(roomCode) {
@@ -327,7 +415,25 @@ const RoomController = {
         } catch (error) {
             console.error('Error viewing room details:', error);
         }
-    }
+    },
+
+    async searchAvailableRooms() {
+        this.isLoading = true;
+
+        try {
+            const rooms = await TTMS.fetchAvailableStudySpaces({
+                timeBlock: this.searchTime,
+                roomType: this.searchType
+            });
+
+            this.availableRooms = rooms;
+        } catch (err) {
+            console.error('Search failed:', err);
+            this.availableRooms = [];
+        } finally {
+            this.isLoading = false;
+        }
+    },
 };
 
 // Make globally available

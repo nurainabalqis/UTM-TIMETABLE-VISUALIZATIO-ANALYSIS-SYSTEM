@@ -61,22 +61,33 @@
 
     <!-- Charts Row 2 -->
     <div class="row">
-
-        <!-- Utilization Levels -->
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-light">
-                    <h5 class="mb-0">
-                        <i class="fas fa-chart-bar me-2"></i>
-                        Room Utilization Levels
-                    </h5>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-building me-2"></i>
+                    N28 – Room Types
                 </div>
                 <div class="card-body">
-                    <div id="usageLevelChart" style="height: 320px;"></div>
+                    <canvas id="n28TypeChart" height="220"></canvas>
+                    <div id="n28RoomList" class="mt-3"></div>
+                </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-building me-2"></i>
+                    N28A – Room Types
+                </div>
+                <div class="card-body">
+                    <canvas id="n28aTypeChart" height="220"></canvas>
+                    <div id="n28aRoomList" class="mt-3"></div>
+                </div>
                 </div>
             </div>
         </div>
-
 
     <!-- Summary -->
     <div class="card mt-4">

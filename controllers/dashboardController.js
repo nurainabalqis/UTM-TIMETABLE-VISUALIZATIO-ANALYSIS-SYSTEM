@@ -389,74 +389,74 @@ const DashboardController = {
     
     // Draw weekly usage chart with REAL data
     async drawWeeklyChartJS() {
-    try {
-        console.log('Drawing WEEKLY chart using Chart.js...');
+        try {
+            console.log('Drawing WEEKLY chart using Chart.js...');
 
-        
-        let canvas = null;
-        for (let i = 0; i < 10; i++) {
-            canvas = document.getElementById('weeklyChartJS');
-            if (canvas) break;
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-
-        if (!canvas) {
-            console.error('weeklyChartJS canvas NEVER appeared in DOM');
-            return;
-        }
-
-        console.log('Canvas found:', canvas);
-
-        
-        const user = JSON.parse(localStorage.getItem('user'));
-        if (!user) {
-            console.warn('No user found for weekly distribution');
-            return;
-        }
-
-        const weekly = await TTMS.fetchWeeklyDistributionForUser(user);
-
-        if (!weekly) {
-            console.warn('No weekly distribution data returned');
-            return;
-        }
-
-
-        if (this.weeklyChart) {
-            this.weeklyChart.destroy();
-        }
-
-        const labels = Object.keys(weekly);
-        const morning = labels.map(d => weekly[d].morning);
-        const afternoon = labels.map(d => weekly[d].afternoon);
-        const evening = labels.map(d => weekly[d].evening);
-
-       
-        this.weeklyChart = new Chart(canvas, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [
-                    { label: 'Morning', data: morning, backgroundColor: '#FF9800' },
-                    { label: 'Afternoon', data: afternoon, backgroundColor: '#4CAF50' },
-                    { label: 'Evening', data: evening, backgroundColor: '#2196F3' }
-                ]
-            },
-            options: {
-                responsive: false,
-                scales: {
-                    x: { stacked: true },
-                    y: { stacked: true, beginAtZero: true }
-                }
+            
+            let canvas = null;
+            for (let i = 0; i < 10; i++) {
+                canvas = document.getElementById('weeklyChartJS');
+                if (canvas) break;
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
-        });
 
-        console.log('✅ Chart.js weekly chart drawn');
+            if (!canvas) {
+                console.error('weeklyChartJS canvas NEVER appeared in DOM');
+                return;
+            }
 
-    } catch (err) {
-        console.error('❌ ERROR drawing Chart.js weekly chart', err);
-    }
-},
+            console.log('Canvas found:', canvas);
+
+            
+            const user = JSON.parse(localStorage.getItem('user'));
+            if (!user) {
+                console.warn('No user found for weekly distribution');
+                return;
+            }
+
+            const weekly = await TTMS.fetchWeeklyDistributionForUser(user);
+
+            if (!weekly) {
+                console.warn('No weekly distribution data returned');
+                return;
+            }
+
+
+            if (this.weeklyChart) {
+                this.weeklyChart.destroy();
+            }
+
+            const labels = Object.keys(weekly);
+            const morning = labels.map(d => weekly[d].morning);
+            const afternoon = labels.map(d => weekly[d].afternoon);
+            const evening = labels.map(d => weekly[d].evening);
+
+        
+            this.weeklyChart = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Morning', data: morning, backgroundColor: '#FF9800' },
+                        { label: 'Afternoon', data: afternoon, backgroundColor: '#4CAF50' },
+                        { label: 'Evening', data: evening, backgroundColor: '#2196F3' }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    scales: {
+                        x: { stacked: true },
+                        y: { stacked: true, beginAtZero: true }
+                    }
+                }
+            });
+
+            console.log('✅ Chart.js weekly chart drawn');
+
+        } catch (err) {
+            console.error('❌ ERROR drawing Chart.js weekly chart', err);
+        }
+    },
 
     
     // Draw peak hours chart with REAL data
