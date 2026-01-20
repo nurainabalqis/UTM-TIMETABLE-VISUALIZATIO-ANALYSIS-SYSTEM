@@ -626,6 +626,16 @@
                     const response = await fetch('views/courses.html');
                     const template = await response.text();
 
+                    const FACULTY_MAP = {
+                        FSKSM: ['SCSE', 'SEC', 'MCS', 'MEC'],
+                        FKE: ['ELE', 'EEE'],
+                        FKM: ['MEC'],
+                        FAB: ['UHB', 'UHL'],
+                        FPPSM: ['UHLB'],
+                        FKKKSA: ['CHE'],
+                        PPIPS: ['SSH']
+                    };
+
                     this.components.courses = Vue.markRaw({
                         template,
 
@@ -731,9 +741,10 @@
                                     // ---- FACULTY FILTER ----
                                     let facultyMatch = true;
                                     if (this.filterFaculty !== 'all') {
-                                        facultyMatch =
-                                            course.kod_subjek &&
-                                            course.kod_subjek.startsWith(this.filterFaculty);
+                                        const prefixes = FACULTY_MAP[this.filterFaculty] || [];
+                                        facultyMatch = prefixes.some(prefix =>
+                                            course.kod_subjek?.startsWith(prefix)
+                                        );
                                     }
 
                                     // ---- SEARCH FILTER ----
