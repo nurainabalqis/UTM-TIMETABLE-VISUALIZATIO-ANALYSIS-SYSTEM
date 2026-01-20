@@ -797,8 +797,8 @@
                             
                             selectSession(sesi, semester) {
                                 TTMS.setCurrentSession(sesi, semester);
-                                localStorage.setItem('currentSession', JSON.stringify({ sesi, semester }));
-                                this.$parent.currentSession = { sesi, semester };
+                                localStorage.setItem('currentSession', JSON.stringify({ sesi: String(sesi), semester: String(semester) }));
+                                this.$parent.currentSession = { sesi: String(sesi), semester: String(semester) };
                                 this.$parent.showAlert(`Session changed to ${sesi}-${semester}`, 'success');
                             },
                             

@@ -66,6 +66,12 @@
                                     <i class="fas fa-check"></i> Select
                                 </button>
                                 <button class="btn btn-sm btn-outline-info" 
+                                        :disabled="
+                                              !(
+                                                    session.sesi === $parent.currentSession.sesi &&
+                                                    session.semester.toString() === $parent.currentSession.semester
+                                                )
+                                        "
                                         @click="viewSessionCourses(session.sesi, session.semester)">
                                     <i class="fas fa-list"></i> Courses
                                 </button>
