@@ -74,14 +74,14 @@ async function loadAllSubjects() {
     
     const tbody = document.querySelector("#clashTable tbody");
     if (tbody) {
-        tbody.innerHTML = "<tr><td colspan='8' class='text-center'>🔄 Loading data from TTMS...</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='8' class='text-center'> Loading data from TTMS...</td></tr>";
     }
 
     let successCount = 0;
     let failCount = 0;
     let totalRecords = 0;
 
-    console.log("🚀 Starting to load TTMS data...");
+    console.log(" Starting to load TTMS data...");
     console.log(`Session: ${SESSION}, Semester: ${SEMESTER}`);
 
     for(const subj of SUBJECTS){
@@ -105,11 +105,11 @@ async function loadAllSubjects() {
                     });
                     successCount++;
                 } else {
-                    console.warn(`⚠️ No data: ${subj.code} Sec ${sec}`);
+                    console.warn(` No data: ${subj.code} Sec ${sec}`);
                     failCount++;
                 }
             } catch (error) {
-                console.error(`❌ Error: ${subj.code} Sec ${sec}:`, error);
+                console.error(`Error: ${subj.code} Sec ${sec}:`, error);
                 failCount++;
             }
             
@@ -123,7 +123,7 @@ async function loadAllSubjects() {
     console.log(`    Total Records: ${totalRecords}`);
 
     if (totalRecords === 0) {
-        alert("⚠️ No data loaded!\n\nCheck console (F12) for errors.");
+        alert(" No data loaded!\n\nCheck console (F12) for errors.");
         totalClashesEl.innerText = "0";
         if (tbody) {
             tbody.innerHTML = "<tr><td colspan='8' class='text-center text-danger'>No data loaded. Check console.</td></tr>";
@@ -284,3 +284,14 @@ if (document.readyState === "complete") {
     window.addEventListener("DOMContentLoaded", loadAllSubjects);
 }
 
+<<<<<<< Updated upstream
+=======
+// Make functions available globally
+window.onload = initializeClashDetection;
+window.loadAllSubjects = loadAllSubjects;
+window.detectClashes = detectClashes;
+window.renderCharts = renderCharts;
+window.initializeClashDetection = initializeClashDetection;
+
+console.log("✅ TTMS Clash Detection loaded");
+>>>>>>> Stashed changes
