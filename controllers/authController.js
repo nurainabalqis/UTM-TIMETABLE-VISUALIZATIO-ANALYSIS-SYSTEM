@@ -1,114 +1,95 @@
 // controllers/authController.js
 const AuthController = {
-    // Check if user is authenticated
-    isAuthenticated() {
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-            try {
-                return JSON.parse(userStr);
-            } catch {
-                return null;
-            }
-        }
+  // Check if user is authenticated
+  isAuthenticated() {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      try {
+        return JSON.parse(userStr);
+      } catch {
         return null;
-    },
+      }
+    }
+    return null;
+  },
 
-    // Get current user
-    getCurrentUser() {
-        return this.isAuthenticated();
-    },
+  // Get current user
+  getCurrentUser() {
+    return this.isAuthenticated();
+  },
 
-    // Login function with automatic role detection
-    async login(username, password, role = null) {
-        try {
-            console.log(`Attempting login for ${username}${role ? ' as ' + role : ''}`);
-            
-            // Use TTMS login
-            const response = await TTMS.login(username, password, role || 'student');
-            
-            if (response.status === "success") {
-                // If role is not provided, detect it
-                let detectedRole = role;
-                if (!detectedRole) {
-                    console.log('🔍 No role provided, detecting...');
-                    detectedRole = await this.detectUserRole(username);
-                }
-                
-                // Create user object WITH session_id
-                const user = {
-                    username: username,
-                    name: response.full_name || response.nama || username,
-                    role: detectedRole,
-                    description: response.description || (detectedRole.charAt(0).toUpperCase() + detectedRole.slice(1)),
-                    loginTime: new Date().toISOString(),
-                    session_id: response.session_id
-                };
-                
-                console.log("✅ Login successful:", user);
-                return { success: true, user: user };
-            } else {
-                console.log("❌ Login failed:", response.message);
-                return { 
-                    success: false, 
-                    message: response.message || "Invalid credentials" 
-                };
-            }
-        } catch (error) {
-            console.error("❌ Login error:", error);
-            return { 
-                success: false, 
-                message: "Network error. Please check your connection." 
-            };
+  // Login function with automatic role detection
+  async login(username, password, role = null) {
+    try {
+      console.log(`Attempting login for ${username}${role ? ' as ' + role : ''}`);
+
+      // Use TTMS login
+      const response = await TTMS.login(username, password, role || 'student');
+
+      if (response.status === "success") {
+        // Prefer TTMS-detected role first
+        let detectedRole = response.role || role;
+        if (!detectedRole) {
+          console.log('🔍 No role provided, detecting...');
+          detectedRole = await this.detectUserRole(username);
         }
-    },
-    
+
+        const user = {
+          username,
+          name: response.full_name || response.nama || username,
+          role: detectedRole,
+          description: response.description || (detectedRole.charAt(0).toUpperCase() + detectedRole.slice(1)),
+          loginTime: new Date().toISOString(),
+
+          // Backward compatible field name used by some UI code
+          session_id: response.user_session_id || response.session_id || null,
+
+          // keep these too
+          user_session_id: response.user_session_id || null,
+          admin_session_id: response.admin_session_id || null,
+          login_name: response.login_name || null
+        };
+
+        console.log("✅ Login successful:", user);
+        return { success: true, user };
+      }
+
+      return {
+        success: false,
+        message: response.message || "Invalid credentials"
+      };
+    } catch (error) {
+      console.error("❌ Login error:", error);
+      return {
+        success: false,
+        message: "Network error. Please check your connection."
+      };
+    }
+  },
     // Detect user role automatically
     async detectUserRole(username) {
-        try {
-            console.log('🔍 Step 1: Detecting role for username:', username);
+    try {
+      console.log('🔍 Step 1: Detecting role for username:', username);
+
+      // 1) Lecturer check
+      try {
+        const lecturers = await TTMS.fetchLecturers();
+        const isLecturer = lecturers.some(lecturer =>
+          lecturer.kod_pensyarah === username ||
+          lecturer.no_pekerja === username ||
+          lecturer.no_kp === username ||
+          lecturer.email === username
+        );
+        if (isLecturer) return 'lecturer';
+      } catch {}
             
-            // Step 1: Check if user is a lecturer
-            try {
-                console.log('🔍 Step 1a: Checking lecturers database...');
-                const lecturers = await TTMS.fetchLecturers();
-                console.log(`Found ${lecturers.length} lecturers in database`);
-                
-                const isLecturer = lecturers.some(lecturer => {
-                    const match = 
-                        lecturer.kod_pensyarah === username || 
-                        lecturer.no_pekerja === username ||
-                        lecturer.no_kp === username ||
-                        lecturer.email === username;
-                    
-                    if (match) {
-                        console.log('✅ Match found in lecturers:', lecturer.nama_pensyarah);
-                    }
-                    return match;
-                });
-                
-                if (isLecturer) {
-                    console.log('✅ DETECTED AS LECTURER');
-                    return 'lecturer';
-                }
-                console.log('❌ Not found in lecturers database');
-            } catch (error) {
-                console.warn('⚠️ Could not check lecturers:', error.message);
-            }
-            
-            // Step 2: Check if user is a student
-            try {
-                console.log('🔍 Step 2: Checking student courses...');
-                const studentCourses = await TTMS.fetchMyCourses(username);
-                console.log(`Found ${studentCourses.length} courses for student`);
-                
-                if (studentCourses && studentCourses.length > 0) {
-                    console.log('✅ DETECTED AS STUDENT (has enrolled courses)');
-                    return 'student';
-                }
-                console.log('❌ No student courses found');
-            } catch (error) {
-                console.warn('⚠️ Could not check student courses:', error.message);
-            }
+      // 2) Student check
+      try {
+        const studentCourses = await TTMS.fetchMyCourses(username);
+        if (studentCourses && studentCourses.length > 0) return 'student';
+      } catch {}
+
+      
             
             // Step 3: Check if username pattern suggests admin
             console.log('🔍 Step 3: Checking admin patterns...');
@@ -144,10 +125,13 @@ const AuthController = {
             console.log('⚠️ No pattern matched, defaulting to STUDENT');
             return 'student';
             
-        } catch (error) {
-            console.error('❌ Error detecting role:', error);
-            return 'student'; // Default to student on error
-        }
+      // 3) Admin heuristic
+      if (username.toLowerCase().includes('admin')) return 'admin';
+
+      return 'student';
+    } catch {
+      return 'student';
+    }
     },
 
     // Logout function
