@@ -394,7 +394,11 @@ async fetchLecturerTimetable(lecturerId, lecturerName = "") {
     try {
         const { sesi, semester } = this.getCurrentSession();
 
-        const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, " ").trim();
+        const norm = (s) => String(s || "")
+            .toUpperCase()
+            .replace(/\s+/g, " ")
+            .trim();
+
         const tokens = norm(lecturerName).split(" ").filter(Boolean);
 
         const nameMatch = (candidate) => {
@@ -405,54 +409,60 @@ async fetchLecturerTimetable(lecturerId, lecturerName = "") {
 
         console.log("📌 fetchLecturerTimetable:", lecturerId, lecturerName, sesi, semester);
 
-        // 1) get all subjects (kod_subjek list)
+        // 1) Get all subjects
         const subjects = await this.fetchWithAdminSession("subjek", { sesi, semester });
         if (!Array.isArray(subjects) || subjects.length === 0) return [];
 
-        const timetableEntries = [];
-
-        // 2) for each subject, get lecturer list by section via subjek_pensyarah
-        for (const s of subjects) {
-            const kod_subjek = s.kod_subjek;
-            if (!kod_subjek) continue;
-
-            const lecList = await this.fetchWithAdminSession("subjek_pensyarah", {
-                kod_subjek,
-                sesi,
-                semester
-            });
-
-            if (!Array.isArray(lecList) || lecList.length === 0) continue;
-
-            // 3) match lecturer by NAME in field "nama"
-            const mySections = lecList.filter(l => nameMatch(l.nama));
-
-            if (mySections.length === 0) continue;
-
-            // 4) fetch jadual_subjek for each matched section
-            for (const m of mySections) {
-                const seksyen = String(m.seksyen || "").trim();
-                if (!seksyen) continue;
-
-                const jadual = await this.fetchWithAdminSession("jadual_subjek", {
-                    kod_subjek,
-                    seksyen,
+        // 2) Fetch ALL subjek_pensyarah in parallel
+        const lecturerMaps = await Promise.all(
+            subjects.map(s =>
+                this.fetchWithAdminSession("subjek_pensyarah", {
+                    kod_subjek: s.kod_subjek,
                     sesi,
                     semester
-                });
+                }).then(list => ({ subject: s, list }))
+                 .catch(() => null)
+            )
+        );
 
-                if (Array.isArray(jadual) && jadual.length > 0) {
-                    jadual.forEach(j => {
-                        timetableEntries.push({
-                            ...j,
-                            kod_subjek,
-                            seksyen,
-                            nama_subjek: s.nama_subjek || j.nama_subjek || ""
-                        });
-                    });
-                }
-            }
-        }
+        // 3) Collect ALL jadual_subjek calls
+        const jadualCalls = [];
+
+        lecturerMaps.forEach(entry => {
+            if (!entry || !Array.isArray(entry.list)) return;
+
+            const { subject, list } = entry;
+
+            const mySections = list.filter(l => nameMatch(l.nama));
+
+            mySections.forEach(m => {
+                const seksyen = String(m.seksyen || "").trim();
+                if (!seksyen) return;
+
+                jadualCalls.push(
+                    this.fetchWithAdminSession("jadual_subjek", {
+                        kod_subjek: subject.kod_subjek,
+                        seksyen,
+                        sesi,
+                        semester
+                    }).then(jadual =>
+                        Array.isArray(jadual)
+                            ? jadual.map(j => ({
+                                ...j,
+                                kod_subjek: subject.kod_subjek,
+                                seksyen,
+                                nama_subjek: subject.nama_subjek || j.nama_subjek || ""
+                            }))
+                            : []
+                    ).catch(() => [])
+                );
+            });
+        });
+
+        // 4) Fetch ALL jadual_subjek in parallel
+        const results = await Promise.all(jadualCalls);
+
+        const timetableEntries = results.flat();
 
         console.log("✅ Lecturer timetable entries:", timetableEntries.length);
         return timetableEntries;
@@ -462,9 +472,6 @@ async fetchLecturerTimetable(lecturerId, lecturerName = "") {
         return [];
     }
 },
-
-
-
 
     // ============ STUDENTS FETCHING ============
 

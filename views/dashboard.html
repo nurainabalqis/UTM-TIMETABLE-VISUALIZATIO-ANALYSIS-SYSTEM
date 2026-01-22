@@ -21,10 +21,14 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted mb-2">My Courses</h6>
+                            <small class="text-muted d-block mb-1">
+                            <span v-if="$parent.user.role === 'lecturer'">Teaching Courses</span>
+                            <span v-else>My Courses</span>
+                            </small>
                             <h2 class="fw-bold text-primary mb-0">{{ stats.myCourses }}</h2>
                             <small class="text-muted">Current session</small>
                         </div>
+
                         <div class="stat-icon bg-primary bg-opacity-10 text-primary">
                             <i class="fas fa-book"></i>
                         </div>

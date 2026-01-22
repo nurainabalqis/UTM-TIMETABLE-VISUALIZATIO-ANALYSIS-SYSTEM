@@ -461,10 +461,15 @@
                     const template = await response.text();
                     const { markRaw } = Vue;
                     
+                    const user = JSON.parse(localStorage.getItem('user'));
+                    const lecturerKey =
+                    user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+
                     this.components.dashboard = markRaw ({
                         template,
                         data() {
                             return {
+                                lecturerKey,
                                 stats: {
                                     myCourses: 0,
                                     totalCourses: 0,
@@ -480,8 +485,14 @@
                             };
                         },
                         async mounted() {
-                            await this.loadDashboardData();
+                        await this.loadDashboardData();
+                        this.$nextTick(() => {
+                            window.analysisController?.initDashboardCharts?.();
+                        });
                         },
+
+
+                        
                         methods: {
                             async loadDashboardData() {
                                 try {
@@ -492,16 +503,74 @@
                                     // Fetch courses
                                     const courses = await TTMS.fetchCourses();
                                     this.stats.totalCourses = courses.length;
+                               
                                     
-                                    // Fetch my courses if student
-                                    if (user.role === 'student') {
-                                        const myCourses = await TTMS.fetchMyCourses(user.username);
-                                        const currentMyCourses = myCourses.filter(c => 
-                                            c.sesi === currentSession.sesi && 
-                                            c.semester.toString() === currentSession.semester
-                                        );
-                                        this.stats.myCourses = currentMyCourses.length;
-                                    }
+
+// ✅ Student dashboard stats
+if (user.role === 'student') {
+  const myCourses = await TTMS.fetchMyCourses(user.username);
+  const currentMyCourses = myCourses.filter(c =>
+    c.sesi === currentSession.sesi &&
+    c.semester.toString() === currentSession.semester
+  );
+  this.stats.myCourses = currentMyCourses.length;
+}
+
+// ✅ Lecturer dashboard stats
+else if (user.role === 'lecturer') {
+    const lecturerId = this.lecturerKey;  // ✅ USE THE KEY YOU BUILT
+    const lecturerName = user.name || "";
+
+  // Option A (best if your TTMS supports it): subjects list
+  let subjects = [];
+  try {
+    subjects = await TTMS.fetchLecturerSubjects(lecturerId);
+  } catch (e) {
+    console.warn("fetchLecturerSubjects not available, fallback to timetable", e);
+  }
+
+  // Filter current session
+  const currentSubjects = (subjects || []).filter(s =>
+    s.sesi === currentSession.sesi &&
+    s.semester.toString() === currentSession.semester
+  );
+
+  // myCourses = number of unique subjects (by code+section)
+  const subjKeySet = new Set(
+    currentSubjects.map(s => `${s.kod_subjek}-${s.seksyen || "1"}`)
+  );
+  this.stats.myCourses = subjKeySet.size;
+
+  // totalStudents (approx) — sum student counts per unique subject-section (dedupe)
+  let total = 0;
+  const seen = new Set();
+  currentSubjects.forEach(s => {
+    const key = `${s.kod_subjek}-${s.seksyen || "1"}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      total += Number(s.bil_pelajar || 0);
+    }
+  });
+  this.stats.totalStudents = total;
+
+  // If subjects endpoint fails, fallback using timetable entries
+  if (subjKeySet.size === 0) {
+    const raw = await TTMS.fetchLecturerTimetable(lecturerId, lecturerName);
+
+    // raw is jadual_subjek sessions → compute unique subject-section
+    const courseSet = new Set();
+    const countMap = {}; // key -> max bil_pelajar
+    (raw || []).forEach(e => {
+      const key = `${e.kod_subjek}-${e.seksyen || "1"}`;
+      courseSet.add(key);
+      countMap[key] = Math.max(countMap[key] || 0, Number(e.bil_pelajar || 0));
+    });
+
+    this.stats.myCourses = courseSet.size;
+    this.stats.totalStudents = Object.values(countMap).reduce((a, b) => a + b, 0);
+  }
+}
+
                                     
                                     // Fetch sessions
                                     const sessions = await TTMS.fetchSessions();
@@ -523,8 +592,11 @@ this.stats.totalStudents = matricSet.size;
                                     
                                     // Initialize charts
                                     if (window.analysisController) {
+                                    this.$nextTick(() => {
                                         window.analysisController.initDashboardCharts();
+                                    });
                                     }
+
                                     
                                 } catch (error) {
                                     console.error('Error loading dashboard data:', error);
