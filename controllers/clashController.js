@@ -284,8 +284,7 @@ if (document.readyState === "complete") {
     window.addEventListener("DOMContentLoaded", loadAllSubjects);
 }
 
-<<<<<<< Updated upstream
-=======
+
 // Make functions available globally
 window.onload = initializeClashDetection;
 window.loadAllSubjects = loadAllSubjects;
@@ -293,5 +292,5 @@ window.detectClashes = detectClashes;
 window.renderCharts = renderCharts;
 window.initializeClashDetection = initializeClashDetection;
 
-console.log("✅ TTMS Clash Detection loaded");
->>>>>>> Stashed changes
+console.log(" TTMS Clash Detection loaded");
+
