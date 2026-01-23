@@ -20,20 +20,9 @@
     <div class="card mb-4">
         <div class="card-body">
             <div class="row g-3 align-items-center">
-                <div class="col-md-3">
-                    <label class="form-label">Academic Session</label>
-                    <select class="form-select" v-model="filterSession" @change="applyFilters">
-                        <option value="current">Current Session Only</option>
-                        <option value="2025/2026-1">2025/2026 Semester 1</option>
-                        <option value="2024/2025-2">2024/2025 Semester 2</option>
-                        <option value="2024/2025-1">2024/2025 Semester 1</option>
-                        <option value="2023/2024-2">2023/2024 Semester 2</option>
-                        <option value="all">All Sessions</option>
-                    </select>
-                </div>
-                
-                <div class="col-md-3">
-                    <label class="form-label">Faculty/Department</label>
+                <div class="col-12 col-lg-4">
+                    <!-- Faculty -->
+                    <label class="form-label mb-1">Faculty/Department</label>
                     <select class="form-select" v-model="filterFaculty" @change="applyFilters">
                         <option value="all">All Faculties</option>
                         <option value="FSKSM">Computing (FSKSM)</option>
@@ -45,19 +34,31 @@
                         <option value="PPIPS">Social Sciences (PPIPS)</option>
                     </select>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label">Search Courses</label>
+
+                <!-- Search (full width input group) -->
+                <div class="col-12 col-lg-6">
+                    <label class="form-label mb-1">Search Courses</label>
                     <div class="input-group">
-                        <input type="text" class="form-control" placeholder="Search by code, name, or lecturer..." 
-                               v-model="searchTerm" @input="applyFilters">
-                        <button class="btn btn-outline-success" type="button">
-                            <i class="fas fa-search"></i>
-                        </button>
+                    <span class="input-group-text bg-white">
+                        <i class="fas fa-search text-success"></i>
+                    </span>
+                    <input
+                        type="text"
+                        class="form-control"
+                        placeholder="Search by code, name, or lecturer..."
+                        v-model="searchTerm"
+                        @input="applyFilters"
+                    />
+                    <button class="btn btn-outline-secondary" type="button" @click="searchTerm=''; applyFilters();">
+                        Clear
+                    </button>
                     </div>
                 </div>
-                <div class="col-md-2 d-flex align-items-end">
-                    <button class="btn btn-utm w-100" @click="loadAllCourses">
-                        <i class="fas fa-sync-alt me-2"></i>Refresh
+
+                <!-- Refresh -->
+                <div class="col-12 col-lg-2 d-grid">
+                    <button class="btn btn-utm" @click="loadAllCourses">
+                    <i class="fas fa-sync-alt me-2"></i>Refresh
                     </button>
                 </div>
             </div>
@@ -77,8 +78,8 @@
         <div class="col-md-3">
             <div class="card bg-light">
                 <div class="card-body text-center py-3">
-                    <h4 class="text-success mb-1">{{ stats.currentCourses }}</h4>
-                    <small class="text-muted">Current Session</small>
+                    <h4 class="text-success mb-1">{{ stats.activeCourses }}</h4>
+                    <small class="text-muted">Active Courses</small>
                 </div>
             </div>
         </div>
@@ -93,8 +94,8 @@
         <div class="col-md-3">
             <div class="card bg-light">
                 <div class="card-body text-center py-3">
-                    <h4 class="text-warning mb-1">{{ stats.uniqueLecturers }}</h4>
-                    <small class="text-muted">Unique Lecturers</small>
+                    <h4 class="text-warning mb-1">{{ stats.totalLecturers }}</h4>
+                    <small class="text-muted">Total Lecturers</small>
                 </div>
             </div>
         </div>
@@ -133,7 +134,6 @@
                             <th>#</th>
                             <th>Course Code</th>
                             <th>Course Name</th>
-                            <th>Session</th>
                             <th>Sections</th>
                             <th>Lecturer</th>
                             <th>Students</th>
@@ -151,9 +151,6 @@
                                       class="badge bg-success ms-2">Current</span>
                             </td>
                             <td>{{ course.nama_subjek || 'N/A' }}</td>
-                            <td>
-                                <span class="badge bg-secondary">{{ course.sesi }}-{{ course.semester }}</span>
-                            </td>
                             <td>
                                 <span class="badge bg-info">{{ course.bil_seksyen || '1' }} section(s)</span>
                             </td>
@@ -210,6 +207,57 @@
                     <small class="text-muted">
                         {{ stats.totalCourses }} total courses in database
                     </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Course Details Modal -->
+    <div v-if="showCourseModal" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered" role="document">
+            <div class="modal-content" style="border-radius: 14px; overflow: hidden;">
+                <div class="modal-header bg-success text-white" style="border-bottom: 0;">
+                    <h5 class="modal-title fw-bold">
+                        {{ ((selectedCourse && selectedCourse.kod_subjek) ? selectedCourse.kod_subjek : '') + ((selectedCourse && selectedCourse.nama_subjek) ? ' – ' + selectedCourse.nama_subjek : '') }}
+                    </h5>
+                    <button type="button" class="btn btn-link text-white text-decoration-none fs-4" @click="closeCourseModal" aria-label="Close">
+                        ×
+                    </button>
+                </div>
+
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div v-if="isCourseModalLoading" class="text-center py-5">
+                        <div class="spinner-border" role="status"></div>
+                        <p class="text-muted mt-3 mb-0">Loading course schedule...</p>
+                    </div>
+
+                    <div v-else>
+                        <div v-if="courseSections.length === 0" class="text-center py-5">
+                            <i class="fas fa-calendar-times fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No schedule found for this course</h5>
+                            <p class="text-muted mb-0">Try switching session/semester or refresh.</p>
+                        </div>
+
+                        <div v-else>
+                            <div v-for="(sec, idx) in courseSections" :key="idx" class="card mb-3" style="border-radius: 12px;">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <h5 class="mb-2 fw-bold">Section {{ sec.section }}</h5>
+                                            <div v-for="(slot, sIdx) in sec.slots" :key="sIdx" class="text-muted">
+                                                {{ slot.dayName }} • {{ slot.timeLabel }} • <strong>{{ slot.kod_bilik }}</strong>
+                                            </div>
+                                        </div>
+                                        <span class="badge bg-success" style="border-radius: 999px;">{{ sec.studentCount }} students</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer" style="border-top: 1px solid #eee;">
+                    <button type="button" class="btn btn-outline-secondary" @click="closeCourseModal">Close</button>
                 </div>
             </div>
         </div>

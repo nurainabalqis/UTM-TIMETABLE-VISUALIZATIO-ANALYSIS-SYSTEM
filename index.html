@@ -736,11 +736,17 @@ this.stats.totalStudents = matricSet.size;
 
                                 // --- STATS (USED BY YOUR HTML) ---
                                 stats: {
-                                    currentCourses: 0,
+                                    activeCourses: 0,
                                     totalStudents: 0,
-                                    uniqueLecturers: 0,
+                                    totalLecturers: 0,
                                     totalCourses: 0
-                                }
+                                },
+
+                                // --- COURSE DETAILS MODAL ---
+                                showCourseModal: false,
+                                isCourseModalLoading: false,
+                                selectedCourse: null,
+                                courseSections: []
                             };
                         },
 
@@ -749,6 +755,31 @@ this.stats.totalStudents = matricSet.size;
                         },
 
                         methods: {
+                            // Convert TTMS slot to label (same mapping used elsewhere in the app)
+                            getTimeSlotLabel(slotNumber) {
+                                const slot = Number(slotNumber);
+                                const timeSlotLabels = {
+                                    1: '07:00-07:50',
+                                    2: '08:00-08:50',
+                                    3: '09:00-09:50',
+                                    4: '10:00-10:50',
+                                    5: '11:00-11:50',
+                                    6: '12:00-12:50',
+                                    7: '13:00-13:50',
+                                    8: '14:00-14:50',
+                                    9: '15:00-15:50',
+                                    10: '16:00-16:50'
+                                };
+
+                                return timeSlotLabels[slot] || `Slot ${slot}`;
+                            },
+
+                            // If jadual_subjek returns "jam" (e.g. "08:00:00"), convert hour -> slot.
+                            hourToSlot(hour) {
+                                const map = { 7: 1, 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 8, 15: 9, 16: 10 };
+                                return map[Number(hour)] || null;
+                            },
+
                             async loadAllCourses() {
                                 this.isLoading = true;
 
@@ -759,40 +790,35 @@ this.stats.totalStudents = matricSet.size;
                                     // ---- COMPUTE STATS (MATCH YOUR UI) ----
                                     this.stats.totalCourses = this.courses.length;
 
-const lecturerSet = new Set();
-let currentSessionCount = 0;
+                                    const lecturerSet = new Set();
+                                    let currentSessionCount = 0;
 
-this.courses.forEach(course => {
-    if (course.kod_pensyarah) {
-        lecturerSet.add(course.kod_pensyarah);
-    }
+                                    this.courses.forEach(course => {
+                                        if (course.kod_pensyarah) {
+                                            lecturerSet.add(course.kod_pensyarah);
+                                        }
 
-    if (
-        course.sesi === this.currentSession.sesi &&
-        String(course.semester).includes(this.currentSession.semester)
-    ) {
-        currentSessionCount++;
-    }
-});
+                                        if (
+                                            course.sesi === this.currentSession.sesi &&
+                                            String(course.semester).includes(this.currentSession.semester)
+                                        ) {
+                                            currentSessionCount++;
+                                        }
+                                    });
 
-this.stats.uniqueLecturers = lecturerSet.size;
-
-// Accurate total students (dedupe by matric) for selected session
-try {
-    const students = await TTMS.fetchStudents(this.currentSession.sesi, this.currentSession.semester);
-    const matricSet = new Set(
-        (students || [])
-            .map(s => (s.no_matrik || s.matrik || s.id || '').toString().trim())
-            .filter(Boolean)
-    );
-    this.stats.totalStudents = matricSet.size;
-} catch (e) {
-    console.warn('⚠️ Unable to fetch accurate students; fallback to 0', e);
-    this.stats.totalStudents = 0;
-}
-
-this.stats.currentCourses = currentSessionCount;
-
+                                    // Accurate total students (dedupe by matric) for selected session
+                                    try {
+                                        const students = await TTMS.fetchStudents(this.currentSession.sesi, this.currentSession.semester);
+                                        const matricSet = new Set(
+                                            (students || [])
+                                                .map(s => (s.no_matrik || s.matrik || s.id || '').toString().trim())
+                                                .filter(Boolean)
+                                        );
+                                        this.stats.totalStudents = matricSet.size;
+                                    } catch (e) {
+                                        console.warn('⚠️ Unable to fetch accurate students; fallback to 0', e);
+                                        this.stats.totalStudents = 0;
+                                    }
 
                                     // ---- APPLY FILTERS LAST ----
                                     this.applyFilters();
@@ -805,27 +831,23 @@ this.stats.currentCourses = currentSessionCount;
                                 }
                             },
 
+                            recomputeSummaryStats() {
+                                const list = Array.isArray(this.filteredCourses) ? this.filteredCourses : [];
+
+                                // Active courses: bil_pelajar > 0
+                                this.stats.activeCourses = list.filter(c => Number(c.bil_pelajar || 0) > 0).length;
+
+                                // Total lecturers: count rows that have any lecturer value (not unique)
+                                this.stats.totalLecturers = list.filter(c =>
+                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim() !== "" &&
+                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim().toUpperCase() !== "N/A"
+                                ).length;
+                            },
+
                             applyFilters() {
                                 const term = this.searchTerm.toLowerCase();
 
                                 this.filteredCourses = this.courses.filter(course => {
-                                    // ---- SESSION FILTER ----
-                                    let sessionMatch = true;
-
-                                    if (this.filterSession === 'current') {
-                                        // TTMS course catalog often has NO semester
-                                        // If sesi matches, accept the course
-                                        if (!course.sesi) {
-                                            sessionMatch = true;
-                                        } else {
-                                            sessionMatch =
-                                                course.sesi === this.currentSession.sesi;
-                                        }
-                                    } else if (this.filterSession !== 'all') {
-                                        const [sesi] = this.filterSession.split('-');
-                                        sessionMatch = course.sesi === sesi;
-                                    }
-
 
                                     // ---- FACULTY FILTER ----
                                     let facultyMatch = true;
@@ -845,15 +867,152 @@ this.stats.currentCourses = currentSessionCount;
                                             course.nama_pensyarah?.toLowerCase().includes(term);
                                     }
 
-                                    return sessionMatch && facultyMatch && searchMatch;
+                                    return facultyMatch && searchMatch;
                                 });
+
+                                this.recomputeSummaryStats();
                             },
 
-                            viewCourseDetails(courseCode) {
-                                this.$parent.showAlert(
-                                    `Viewing details for course ${courseCode}`,
-                                    'info'
-                                );
+                            async fetchSectionStudentCounts(courseCode) {
+                                const { sesi, semester } = this.currentSession;
+
+                                // IMPORTANT:
+                                // Many TTMS deployments return ALL courses for subjek_seksyen even if you pass kod_subjek.
+                                // So fetch, then filter client-side.
+                                const res = await TTMS.fetchWithAdminSession("subjek_seksyen", { sesi, semester });
+
+                                // Find the SINGLE course record
+                                const record = (res || []).find(r => String(r.kod_subjek).trim() === String(courseCode).trim());
+
+                                console.log("subjek_seksyen total records:", (res || []).length);
+                                console.log("subjek_seksyen matched record:", record);
+
+                                if (!record) return {}; // means TTMS didn't publish section list for this course
+
+                                const map = {};
+
+                                // TTMS shape shown in your console: record.seksyen_list = [{ seksyen, bil_p, ... }]
+                                const list = Array.isArray(record.seksyen_list) ? record.seksyen_list : [];
+
+                                list.forEach(x => {
+                                    const sec = String(x.seksyen || "").trim();
+                                    if (!sec) return;
+
+                                    // In your console, the field is "bil_p" (not bil_pelajar)
+                                    const cnt = Number(x.bil_p ?? x.bil_pelajar ?? x.bil ?? 0);
+
+                                    map[sec] = cnt > 0 ? cnt : 0;
+                                });
+
+                                return map;
+                            },
+
+                            closeCourseModal() {
+                                this.showCourseModal = false;
+                                this.isCourseModalLoading = false; // ✅ ensure spinner stops if user closes early
+                                this.selectedCourse = null;
+                                this.courseSections = [];
+                            },
+
+                            async viewCourseDetails(courseCode) {
+                                this.showCourseModal = true;
+                                this.isCourseModalLoading = true;
+
+                                this.selectedCourse =
+                                    this.courses.find(c => c.kod_subjek === courseCode) || { kod_subjek: courseCode, nama_subjek: "" };
+
+                                this.courseSections = [];
+
+                                try {
+                                    const { sesi, semester } = this.currentSession;
+
+                                    // 1) REAL student counts per section (from TTMS "Pensyarah & Seksyen")
+                                    const studentMap = await this.fetchSectionStudentCounts(courseCode);
+                                    const sectionKeysFromTTMS = Object.keys(studentMap); // ex: ["50","51","52"]
+
+                                    // 2) Schedules for the course (for day/time/room)
+                                    const schedules = await TTMS.fetchWithAdminSession("jadual_subjek", {
+                                    kod_subjek: courseCode,
+                                    sesi,
+                                    semester
+                                    });
+
+                                    const getDayName = (hari) => {
+                                    if (typeof TTMS.getDayNameFromHari === "function") return TTMS.getDayNameFromHari(hari);
+                                    const map = { 2: "Monday", 3: "Tuesday", 4: "Wednesday", 5: "Thursday", 6: "Friday", 7: "Saturday", 1: "Sunday" };
+                                    return map[Number(hari)] || `Day ${hari}`;
+                                    };
+
+                                    const getTimeLabel = (masa) => {
+                                    const slot = Number(masa);
+                                    const labels = {
+                                        1: "07:00-07:50", 2: "08:00-08:50", 3: "09:00-09:50", 4: "10:00-10:50",
+                                        5: "11:00-11:50", 6: "12:00-12:50", 7: "13:00-13:50", 8: "14:00-14:50",
+                                        9: "15:00-15:50", 10: "16:00-16:50"
+                                    };
+                                    return labels[slot] || `Slot ${slot}`;
+                                    };
+
+                                    // 3) Build sections ONLY from TTMS section list (truth source)
+                                    const sectionMap = {};
+                                    sectionKeysFromTTMS.forEach(sec => {
+                                    sectionMap[sec] = { section: sec, studentCount: Number(studentMap[sec] || 0), slots: [], _seen: new Set() };
+                                    });
+
+                                    // 4) Fill schedules into those sections
+                                    (schedules || []).forEach(s => {
+                                    const sec = String(s.seksyen || "").trim();
+                                    if (!sec) return;
+
+                                    // IMPORTANT: ignore schedule sections not in TTMS list (prevents random sections)
+                                    // If you want to show them, you can allow it — but TTMS page won't show them.
+                                    if (!sectionMap[sec]) return;
+
+                                    const room =
+                                        s.kod_bilik ||
+                                        s.kod_ruang ||
+                                        s.ruang?.kod_ruang ||
+                                        s.ruang?.nama_ruang_singkat ||
+                                        s.ruang?.nama_ruang ||
+                                        "TBA";
+
+                                    const dName = getDayName(s.hari);
+                                    const tLabel = getTimeLabel(s.masa);
+
+                                    const key = `${dName}|${tLabel}|${room}`;
+                                    if (!sectionMap[sec]._seen.has(key)) {
+                                        sectionMap[sec]._seen.add(key);
+                                        sectionMap[sec].slots.push({
+                                        dayName: dName,
+                                        timeLabel: tLabel,
+                                        kod_bilik: room,
+                                        _hari: Number(s.hari || 99),
+                                        _masa: Number(s.masa || 999)
+                                        });
+                                    }
+                                    });
+
+                                    // 5) Sort + cleanup
+                                    Object.values(sectionMap).forEach(sec => {
+                                    sec.slots = sec.slots
+                                        .sort((a, b) => (a._hari - b._hari) || (a._masa - b._masa))
+                                        .map(x => ({ dayName: x.dayName, timeLabel: x.timeLabel, kod_bilik: x.kod_bilik }));
+                                    delete sec._seen;
+                                    });
+
+                                    this.courseSections = Object.values(sectionMap).sort((a, b) => Number(a.section) - Number(b.section));
+
+                                    // If TTMS doesn't publish section list, you’ll get empty — which matches truth.
+                                    if (this.courseSections.length === 0) {
+                                    this.$parent.showAlert("TTMS did not return section enrolment list for this course (subjek_seksyen).", "warning");
+                                    }
+                                } catch (err) {
+                                    console.error(err);
+                                    this.courseSections = [];
+                                    this.$parent.showAlert("Failed to load course details from TTMS", "danger");
+                                } finally {
+                                    this.isCourseModalLoading = false;
+                                }
                             }
                         }
                     });
@@ -937,16 +1096,16 @@ this.stats.currentCourses = currentSessionCount;
                                 viewMode: 'table',
                                 days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
                                 timeSlots: [
-                                    { time: 7, slot: 1, label: '07:00-07:50' },
-                                    { time: 8, slot: 2, label: '08:00-08:50' },
-                                    { time: 9, slot: 3, label: '09:00-09:50' },
-                                    { time: 10, slot: 4, label: '10:00-10:50' },
-                                    { time: 11, slot: 5, label: '11:00-11:50' },
-                                    { time: 12, slot: 6, label: '12:00-12:50' },
-                                    { time: 13, slot: 7, label: '13:00-13:50' },
-                                    { time: 14, slot: 8, label: '14:00-14:50' },
-                                    { time: 15, slot: 9, label: '15:00-15:50' },
-                                    { time: 16, slot: 10, label: '16:00-16:50' }
+                                    { time: 1, slot: 1, label: '07:00-07:50' },
+                                    { time: 2, slot: 2, label: '08:00-08:50' },
+                                    { time: 3, slot: 3, label: '09:00-09:50' },
+                                    { time: 4, slot: 4, label: '10:00-10:50' },
+                                    { time: 5, slot: 5, label: '11:00-11:50' },
+                                    { time: 6, slot: 6, label: '12:00-12:50' },
+                                    { time: 7, slot: 7, label: '13:00-13:50' },
+                                    { time: 8, slot: 8, label: '14:00-14:50' },
+                                    { time: 9, slot: 9, label: '15:00-15:50' },
+                                    { time: 10, slot: 10, label: '16:00-16:50' }
                                 ],
                                 lastUpdated: new Date().toLocaleTimeString(),
                                 totalCourses: 0,
@@ -1302,7 +1461,7 @@ console.log("✅ Lecturer timetable rendered:", this.timetable.length);
                             },
 
 mapDay(dayNumber) {
-  const dayMap = {1:"Monday",2:"Tuesday",3:"Wednesday",4:"Thursday",5:"Friday"};
+  const dayMap = {2:"Monday",3:"Tuesday",4:"Wednesday",5:"Thursday",6:"Friday"};
   return dayMap[Number(dayNumber)] || null;
 },
 
