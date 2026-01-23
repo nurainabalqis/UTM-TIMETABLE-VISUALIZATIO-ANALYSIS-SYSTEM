@@ -340,17 +340,14 @@ const RoomController = {
                 plugins: { legend: { display: false } },
                 onClick: (_, elements) => {
                     if (!elements.length) return;
+
                     const idx = elements[0].index;
                     const type = labels[idx];
 
-                    list.innerHTML = `
-                        <strong>${type} (${grouped[type].length})</strong>
-                        <ul class="mt-2">
-                            ${grouped[type]
-                                .map(r => `<li>${r.nama_ruang}</li>`)
-                                .join('')}
-                        </ul>
-                    `;
+                    const roomsForType = grouped[type] || [];
+
+                    // Open modal tab like your screenshot
+                    this.showRoomListModal(`${building} — ${type} (${roomsForType.length})`, roomsForType);
                 },
                 scales: {
                     y: { beginAtZero: true, ticks: { precision: 0 } }
@@ -434,7 +431,43 @@ const RoomController = {
             this.isLoading = false;
         }
     },
+
+    showRoomListModal(title, rooms) {
+        const titleEl = document.getElementById("roomListModalTitle");
+        const bodyEl  = document.getElementById("roomListModalBody");
+        const modalEl = document.getElementById("roomListModal");
+
+        if (!titleEl || !bodyEl || !modalEl) {
+            console.warn("roomListModal not found in HTML");
+            return;
+        }
+
+        titleEl.textContent = title;
+
+        if (!rooms || rooms.length === 0) {
+            bodyEl.innerHTML = `<div class="text-muted">No rooms found.</div>`;
+        } else {
+            bodyEl.innerHTML = `
+            <div class="list-group">
+                ${rooms.map(r => `
+                <div class="list-group-item d-flex justify-content-between align-items-start">
+                    <div>
+                    <div class="fw-semibold">${r.nama_ruang || "-"}</div>
+                    <div class="text-muted small">${r.kod_ruang || ""} · ${(r.jenis || "Others")}</div>
+                    </div>
+                    <span class="badge bg-success">${TTMS.getBuildingFromRoomCode(r.kod_ruang) || ""}</span>
+                </div>
+                `).join("")}
+            </div>
+            `;
+        }
+
+        // Bootstrap 5 modal show
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+    },
 };
+
 
 // Make globally available
 window.RoomController = RoomController;
