@@ -1869,25 +1869,25 @@ mapDay(dayNumber) {
                                 
                                 // Grouped time blocks (8AM-11AM, 11AM-2PM, 2PM-5PM)
                                 timeBlocks: [
-                                    { 
-                                        id: 'morning', 
-                                        name: 'Morning', 
+                                    {
+                                        id: 'morning',
+                                        name: 'Morning',
                                         timeRange: '8:00 AM - 11:00 AM',
-                                        slots: [2, 3, 4, 5], // TTMS slots 2-5 (8AM-11AM)
+                                        slots: [2, 3, 4], // 8,9,10
                                         description: 'Morning classes'
                                     },
-                                    { 
-                                        id: 'afternoon', 
-                                        name: 'Afternoon', 
+                                    {
+                                        id: 'afternoon',
+                                        name: 'Afternoon',
                                         timeRange: '11:00 AM - 2:00 PM',
-                                        slots: [5, 6, 7, 8], // TTMS slots 5-8 (11AM-2PM)
+                                        slots: [5, 6, 7], // 11,12,1
                                         description: 'Afternoon classes'
                                     },
-                                    { 
-                                        id: 'evening', 
-                                        name: 'Evening', 
+                                    {
+                                        id: 'evening',
+                                        name: 'Evening',
                                         timeRange: '2:00 PM - 5:00 PM',
-                                        slots: [8, 9, 10], // TTMS slots 8-10 (2PM-5PM)
+                                        slots: [8, 9, 10], // 2,3,4
                                         description: 'Evening classes'
                                     }
                                 ],
@@ -1957,7 +1957,10 @@ mapDay(dayNumber) {
                                     if (this.userRole === 'student') {
                                         await this.loadStudentTimetable(user.username);
                                     } else if (this.userRole === 'lecturer') {
-                                        await this.loadLecturerTimetable(user.username);
+                                        const lecturerKey =
+                                            user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+
+                                        await this.loadLecturerTimetable(lecturerKey, user.name);
                                     } else {
                                         await this.loadAdminTimetable();
                                     }
@@ -2040,61 +2043,34 @@ mapDay(dayNumber) {
                                 }
                             },
                             
-                            async loadLecturerTimetable(lecturerId) {
+                            async loadLecturerTimetable(lecturerId, lecturerName = "") {
                                 try {
-                                    console.log(`👨‍🏫 Loading lecturer timetable for ${lecturerId}`);
-                                    
-                                    // Get current session
-                                    const currentSession = this.$parent.currentSession || { sesi: '2025/2026', semester: '1' };
-                                    
-                                    // Fetch lecturer's subjects
-                                    const lecturerSubjects = await TTMS.fetchLecturerSubjects(lecturerId);
-                                    
-                                    if (!lecturerSubjects || lecturerSubjects.length === 0) {
-                                        console.log('No subjects found for lecturer');
-                                        return;
+                                    console.log(`👨‍🏫 Loading lecturer timetable (DIRECT) for ${lecturerId} / ${lecturerName}`);
+
+                                    const entries = await TTMS.fetchLecturerTimetable(lecturerId, lecturerName);
+
+                                    if (!Array.isArray(entries) || entries.length === 0) {
+                                    console.warn("⚠️ No timetable entries found for lecturer heatmap");
+                                    return;
                                     }
-                                    
-                                    console.log(`📚 Found ${lecturerSubjects.length} teaching subjects`);
-                                    
-                                    // Filter for current session
-                                    const currentSubjects = lecturerSubjects.filter(subject => 
-                                        subject.sesi === currentSession.sesi && 
-                                        subject.semester.toString() === currentSession.semester
-                                    );
-                                    
-                                    this.myCourses = currentSubjects;
-                                    console.log(`📅 ${currentSubjects.length} subjects in current session`);
-                                    
-                                    // Get schedule for each subject
-                                    for (const subject of currentSubjects) {
-                                        if (!subject.kod_subjek) continue;
-                                        
-                                        try {
-                                            const schedule = await TTMS.fetchCourseSchedule(
-                                                subject.kod_subjek,
-                                                currentSession.sesi,
-                                                currentSession.semester,
-                                                subject.seksyen || null
-                                            );
-                                            
-                                            if (schedule && Array.isArray(schedule)) {
-                                                schedule.forEach(session => {
-                                                    this.mySessions.push({
-                                                        ...session,
-                                                        courseCode: subject.kod_subjek,
-                                                        courseName: subject.nama_subjek,
-                                                        section: subject.seksyen || 'N/A'
-                                                    });
-                                                });
-                                            }
-                                        } catch (error) {
-                                            console.warn(`Could not fetch schedule for ${subject.kod_subjek}:`, error);
-                                        }
-                                    }
-                                    
+
+                                    // Convert jadual_subjek entries into the shape your heatmap expects
+                                    entries.forEach(e => {
+                                    this.mySessions.push({
+                                        ...e,
+                                        courseCode: e.kod_subjek,
+                                        courseName: e.nama_subjek || e.kod_subjek,
+                                        section: String(e.seksyen || "1"),
+
+                                        // normalize room (your processMySessions uses kod_bilik OR ruang.kod_ruang)
+                                        kod_bilik: e.kod_bilik || e.kod_ruang || (e.ruang ? e.ruang.kod_ruang : null)
+                                    });
+                                    });
+
+                                    console.log(`✅ Lecturer heatmap sessions loaded: ${this.mySessions.length}`);
+
                                 } catch (error) {
-                                    console.error('Error loading lecturer timetable:', error);
+                                    console.error("❌ Error loading lecturer timetable for heatmap:", error);
                                     throw error;
                                 }
                             },
@@ -2126,8 +2102,8 @@ mapDay(dayNumber) {
                                 console.log(`🔄 Processing ${this.mySessions.length} personal class sessions`);
                                 
                                 this.mySessions.forEach(session => {
-                                    const day = session.hari;   // TTMS day number (2-6)
-                                    const slot = session.masa;  // TTMS time slot (1-10)
+                                    const day = Number(session.hari);   // TTMS day number (2-6)
+                                    const slot = Number(session.masa);  // TTMS time slot (1-10)
                                     
                                     // Only process weekdays 2-6
                                     if (day >= 2 && day <= 6) {
@@ -2143,8 +2119,10 @@ mapDay(dayNumber) {
                                                 courseName: session.courseName,
                                                 room: session.kod_bilik || (session.ruang ? session.ruang.kod_ruang : 'N/A'),
                                                 section: session.section,
-                                                slot: slot,
-                                                time: this.getTimeForSlot(slot)
+                                                slot,
+                                                timeRange: this.getTimeRangeForSlot(slot),
+                                                startTime: this.getStartTimeForSlot(slot),
+                                                endTime: this.getEndTimeForSlot(slot),
                                             });
                                             
                                             // Count as one task
@@ -2155,20 +2133,40 @@ mapDay(dayNumber) {
                             },
                             
                             getBlockForSlot(slot) {
-                                // Map TTMS slot to our time blocks
-                                if ([2, 3, 4, 5].includes(slot)) return 'morning';    // 8AM-11AM
-                                if ([5, 6, 7, 8].includes(slot)) return 'afternoon';  // 11AM-2PM
-                                if ([8, 9, 10].includes(slot)) return 'evening';      // 2PM-5PM
-                                return null; // Slot 1 (7AM) or other non-included slots
+                                const s = Number(slot); // important
+                                if ([2, 3, 4].includes(s)) return 'morning';
+                                if ([5, 6, 7].includes(s)) return 'afternoon';
+                                if ([8, 9, 10].includes(s)) return 'evening';
+                                return null; // exclude slot 1 (7AM) and others
                             },
                             
-                            getTimeForSlot(slot) {
-                                // Convert TTMS slot to time string
-                                const slotTimes = {
-                                    1: '7:00 AM', 2: '8:00 AM', 3: '9:00 AM', 4: '10:00 AM', 5: '11:00 AM',
-                                    6: '12:00 PM', 7: '1:00 PM', 8: '2:00 PM', 9: '3:00 PM', 10: '4:00 PM'
+                            getTimeRangeForSlot(slot) {
+                                const ranges = {
+                                    1:  '7:00 AM - 7:50 AM',
+                                    2:  '8:00 AM - 8:50 AM',
+                                    3:  '9:00 AM - 9:50 AM',
+                                    4:  '10:00 AM - 10:50 AM',
+                                    5:  '11:00 AM - 11:50 AM',
+                                    6:  '12:00 PM - 12:50 PM',
+                                    7:  '1:00 PM - 1:50 PM',
+                                    8:  '2:00 PM - 2:50 PM',
+                                    9:  '3:00 PM - 3:50 PM',
+                                    10: '4:00 PM - 4:50 PM',
+                                    11: '5:00 PM - 5:50 PM',
+                                    12: '6:00 PM - 6:50 PM',
+                                    13: '7:00 PM - 7:50 PM',
+                                    14: '8:00 PM - 8:50 PM',
+                                    15: '9:00 PM - 9:50 PM'
                                 };
-                                return slotTimes[slot] || `Slot ${slot}`;
+                                return ranges[Number(slot)] || `Slot ${slot}`;
+                            },
+
+                            getStartTimeForSlot(slot) {
+                                return this.getTimeRangeForSlot(slot).split(' - ')[0];
+                            },
+
+                            getEndTimeForSlot(slot) {
+                                return this.getTimeRangeForSlot(slot).split(' - ')[1];
                             },
                             
                             // ============ PERSONAL STATISTICS ============
@@ -2810,26 +2808,36 @@ mapDay(dayNumber) {
                                 const blockObj = this.timeBlocks.find(b => b.id === blockId);
                                 const key = `${day}-${blockId}`;
                                 const data = this.blockData[key];
-                                
+
                                 const taskCount = data?.taskCount || 0;
-                                const sessions = data?.sessions || [];
-                                
+                                const sessions = (data?.sessions || []).map(s => ({
+                                    ...s,
+                                    slot: Number(s.slot),
+                                })).sort((a,b) => a.slot - b.slot);
+
+                                // ✅ REAL time range for modal (min slot start → max slot end)
+                                let realTimeRange = blockObj ? blockObj.timeRange : '';
+                                if (sessions.length > 0) {
+                                    const minSlot = sessions[0].slot;
+                                    const maxSlot = sessions[sessions.length - 1].slot;
+                                    realTimeRange = `${this.getStartTimeForSlot(minSlot)} - ${this.getEndTimeForSlot(maxSlot)}`;
+                                }
+
                                 this.selectedBlock = {
                                     dayId: day,
                                     dayName: dayObj ? dayObj.name : 'Day ' + day,
-                                    blockId: blockId,
+                                    blockId,
                                     blockName: blockObj ? blockObj.name : 'Block ' + blockId,
-                                    timeRange: blockObj ? blockObj.timeRange : '',
+
+                                    // ✅ use real range instead of fixed label
+                                    timeRange: realTimeRange,
+
                                     isBusy: taskCount > 0,
-                                    sessions: sessions
+                                    sessions
                                 };
-                                
-                                // Show modal using Bootstrap
+
                                 const modalElement = document.getElementById('blockDetailsModal');
-                                if (modalElement) {
-                                    const modal = new bootstrap.Modal(modalElement);
-                                    modal.show();
-                                }
+                                if (modalElement) new bootstrap.Modal(modalElement).show();
                             },
                             
                             // ============ DAY ANALYSIS GETTERS ============
