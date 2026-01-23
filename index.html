@@ -2964,7 +2964,7 @@ mapDay(dayNumber) {
             }
         });
         
-        app.mount('#app');
+        window.vm = app.mount('#app');   // vm = Vue root instance (has vm.user)
     </script>
 </body>
 </html>
