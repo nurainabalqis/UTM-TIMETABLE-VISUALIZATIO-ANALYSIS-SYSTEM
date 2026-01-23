@@ -461,10 +461,15 @@
                     const template = await response.text();
                     const { markRaw } = Vue;
                     
+                    const user = JSON.parse(localStorage.getItem('user'));
+                    const lecturerKey =
+                    user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+
                     this.components.dashboard = markRaw ({
                         template,
                         data() {
                             return {
+                                lecturerKey,
                                 stats: {
                                     myCourses: 0,
                                     totalCourses: 0,
@@ -480,8 +485,14 @@
                             };
                         },
                         async mounted() {
-                            await this.loadDashboardData();
+                        await this.loadDashboardData();
+                        this.$nextTick(() => {
+                            window.analysisController?.initDashboardCharts?.();
+                        });
                         },
+
+
+                        
                         methods: {
                             async loadDashboardData() {
                                 try {
@@ -492,25 +503,88 @@
                                     // Fetch courses
                                     const courses = await TTMS.fetchCourses();
                                     this.stats.totalCourses = courses.length;
+                               
                                     
-                                    // Fetch my courses if student
-                                    if (user.role === 'student') {
-                                        const myCourses = await TTMS.fetchMyCourses(user.username);
-                                        const currentMyCourses = myCourses.filter(c => 
-                                            c.sesi === currentSession.sesi && 
-                                            c.semester.toString() === currentSession.semester
-                                        );
-                                        this.stats.myCourses = currentMyCourses.length;
-                                    }
+
+// ✅ Student dashboard stats
+if (user.role === 'student') {
+  const myCourses = await TTMS.fetchMyCourses(user.username);
+  const currentMyCourses = myCourses.filter(c =>
+    c.sesi === currentSession.sesi &&
+    c.semester.toString() === currentSession.semester
+  );
+  this.stats.myCourses = currentMyCourses.length;
+}
+
+// ✅ Lecturer dashboard stats
+else if (user.role === 'lecturer') {
+    const lecturerId = this.lecturerKey;  // ✅ USE THE KEY YOU BUILT
+    const lecturerName = user.name || "";
+
+  // Option A (best if your TTMS supports it): subjects list
+  let subjects = [];
+  try {
+    subjects = await TTMS.fetchLecturerSubjects(lecturerId);
+  } catch (e) {
+    console.warn("fetchLecturerSubjects not available, fallback to timetable", e);
+  }
+
+  // Filter current session
+  const currentSubjects = (subjects || []).filter(s =>
+    s.sesi === currentSession.sesi &&
+    s.semester.toString() === currentSession.semester
+  );
+
+  // myCourses = number of unique subjects (by code+section)
+  const subjKeySet = new Set(
+    currentSubjects.map(s => `${s.kod_subjek}-${s.seksyen || "1"}`)
+  );
+  this.stats.myCourses = subjKeySet.size;
+
+  // totalStudents (approx) — sum student counts per unique subject-section (dedupe)
+  let total = 0;
+  const seen = new Set();
+  currentSubjects.forEach(s => {
+    const key = `${s.kod_subjek}-${s.seksyen || "1"}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      total += Number(s.bil_pelajar || 0);
+    }
+  });
+  this.stats.totalStudents = total;
+
+  // If subjects endpoint fails, fallback using timetable entries
+  if (subjKeySet.size === 0) {
+    const raw = await TTMS.fetchLecturerTimetable(lecturerId, lecturerName);
+
+    // raw is jadual_subjek sessions → compute unique subject-section
+    const courseSet = new Set();
+    const countMap = {}; // key -> max bil_pelajar
+    (raw || []).forEach(e => {
+      const key = `${e.kod_subjek}-${e.seksyen || "1"}`;
+      courseSet.add(key);
+      countMap[key] = Math.max(countMap[key] || 0, Number(e.bil_pelajar || 0));
+    });
+
+    this.stats.myCourses = courseSet.size;
+    this.stats.totalStudents = Object.values(countMap).reduce((a, b) => a + b, 0);
+  }
+}
+
                                     
                                     // Fetch sessions
                                     const sessions = await TTMS.fetchSessions();
                                     this.stats.totalSessions = sessions.length;
                                     
-                                    // Estimate total students (from courses)
-                                    this.stats.totalStudents = courses.reduce((sum, course) => 
-                                        sum + (parseInt(course.bil_pelajar) || 0), 0
-                                    );
+// Accurate total students (dedupe by matric)
+const students = await TTMS.fetchStudents(currentSession.sesi, currentSession.semester);
+const matricSet = new Set(
+  (students || [])
+    .map(s => (s.no_matrik || s.matrik || s.id || '').toString().trim())
+    .filter(Boolean)
+);
+this.stats.totalStudents = matricSet.size;
+
                                     
                                     // Room utilization
                                     const roomUtilization = await TTMS.fetchRoomUtilization();
@@ -518,8 +592,11 @@
                                     
                                     // Initialize charts
                                     if (window.analysisController) {
+                                    this.$nextTick(() => {
                                         window.analysisController.initDashboardCharts();
+                                    });
                                     }
+
                                     
                                 } catch (error) {
                                     console.error('Error loading dashboard data:', error);
@@ -626,6 +703,16 @@
                     const response = await fetch('views/courses.html');
                     const template = await response.text();
 
+                    const FACULTY_MAP = {
+                        FSKSM: ['SCSE', 'SEC', 'MCS', 'MEC'],
+                        FKE: ['ELE', 'EEE'],
+                        FKM: ['MEC'],
+                        FAB: ['UHB', 'UHL'],
+                        FPPSM: ['UHLB'],
+                        FKKKSA: ['CHE'],
+                        PPIPS: ['SSH']
+                    };
+
                     this.components.courses = Vue.markRaw({
                         template,
 
@@ -672,28 +759,40 @@
                                     // ---- COMPUTE STATS (MATCH YOUR UI) ----
                                     this.stats.totalCourses = this.courses.length;
 
-                                    const lecturerSet = new Set();
-                                    let totalStudents = 0;
-                                    let currentSessionCount = 0;
+const lecturerSet = new Set();
+let currentSessionCount = 0;
 
-                                    this.courses.forEach(course => {
-                                        if (course.kod_pensyarah) {
-                                            lecturerSet.add(course.kod_pensyarah);
-                                        }
+this.courses.forEach(course => {
+    if (course.kod_pensyarah) {
+        lecturerSet.add(course.kod_pensyarah);
+    }
 
-                                        totalStudents += parseInt(course.bil_pelajar) || 0;
+    if (
+        course.sesi === this.currentSession.sesi &&
+        String(course.semester).includes(this.currentSession.semester)
+    ) {
+        currentSessionCount++;
+    }
+});
 
-                                        if (
-                                            course.sesi === this.currentSession.sesi &&
-                                            String(course.semester).includes(this.currentSession.semester)
-                                        ) {
-                                            currentSessionCount++;
-                                        }
-                                    });
+this.stats.uniqueLecturers = lecturerSet.size;
 
-                                    this.stats.uniqueLecturers = lecturerSet.size;
-                                    this.stats.totalStudents = totalStudents;
-                                    this.stats.currentCourses = currentSessionCount;
+// Accurate total students (dedupe by matric) for selected session
+try {
+    const students = await TTMS.fetchStudents(this.currentSession.sesi, this.currentSession.semester);
+    const matricSet = new Set(
+        (students || [])
+            .map(s => (s.no_matrik || s.matrik || s.id || '').toString().trim())
+            .filter(Boolean)
+    );
+    this.stats.totalStudents = matricSet.size;
+} catch (e) {
+    console.warn('⚠️ Unable to fetch accurate students; fallback to 0', e);
+    this.stats.totalStudents = 0;
+}
+
+this.stats.currentCourses = currentSessionCount;
+
 
                                     // ---- APPLY FILTERS LAST ----
                                     this.applyFilters();
@@ -731,9 +830,10 @@
                                     // ---- FACULTY FILTER ----
                                     let facultyMatch = true;
                                     if (this.filterFaculty !== 'all') {
-                                        facultyMatch =
-                                            course.kod_subjek &&
-                                            course.kod_subjek.startsWith(this.filterFaculty);
+                                        const prefixes = FACULTY_MAP[this.filterFaculty] || [];
+                                        facultyMatch = prefixes.some(prefix =>
+                                            course.kod_subjek?.startsWith(prefix)
+                                        );
                                     }
 
                                     // ---- SEARCH FILTER ----
@@ -797,8 +897,8 @@
                             
                             selectSession(sesi, semester) {
                                 TTMS.setCurrentSession(sesi, semester);
-                                localStorage.setItem('currentSession', JSON.stringify({ sesi, semester }));
-                                this.$parent.currentSession = { sesi, semester };
+                                localStorage.setItem('currentSession', JSON.stringify({ sesi: String(sesi), semester: String(semester) }));
+                                this.$parent.currentSession = { sesi: String(sesi), semester: String(semester) };
                                 this.$parent.showAlert(`Session changed to ${sesi}-${semester}`, 'success');
                             },
                             
@@ -959,14 +1059,80 @@
                                         // Method 2: Direct TTMS call
                                         if (!timetableData || timetableData.length === 0) {
                                             console.log('🔄 Trying direct TTMS fetch...');
-                                            timetableData = await TTMS.fetchLecturerTimetable(user.username);
+                                            const lecturerId = user.login_name || user.username;
+                                            const lecturerName = user.name; // IMPORTANT: "TONI ANWAR"
+                                            timetableData = await TTMS.fetchLecturerTimetable(lecturerId, lecturerName);
+// timetableData is raw jadual_subjek array (sessions)
+if (!Array.isArray(timetableData) || timetableData.length === 0) {
+    console.warn("⚠️ No timetable entries returned from TTMS");
+    this.timetableData = [];
+    this.processTimetableData();
+    this.calculateStatistics();
+    return;
+}
+
+// Convert jadual_subjek sessions -> course objects with schedule[]
+const byCourse = {};
+
+timetableData.forEach(e => {
+    const code = e.kod_subjek;
+    const section = String(e.seksyen || '1');
+    const key = `${code}-${section}`;
+
+    if (!byCourse[key]) {
+        byCourse[key] = {
+            courseCode: code,
+            courseName: e.nama_subjek || code,
+            section: section,
+            studentCount: e.bil_pelajar || 0,
+            schedule: []
+        };
+    }
+
+    byCourse[key].schedule.push({
+        hari: Number(e.hari),
+        masa: Number(e.masa),
+        ruang: e.ruang || null,
+        kod_bilik: e.ruang?.kod_ruang || null
+    });
+});
+
+// ✅ set timetableData in the expected format
+this.timetableData = Object.values(byCourse);
+
+console.log("✅ Lecturer timetable converted:", this.timetableData.length, this.timetableData);
+
+// then continue normal pipeline
+this.processTimetableData();
+this.calculateStatistics();
+this.lastUpdated = new Date().toLocaleTimeString();
+return;
+
                                         }
+                
                                         
-                                        // Method 3: Alternative method
-                                        if (!timetableData || timetableData.length === 0) {
-                                            console.log('🔄 Trying alternative method...');
-                                            timetableData = await this.getLecturerTimetableFromCourses(user);
-                                        }
+// Lecturer timetable MUST come from jadual_subjek (not courses)
+if (!Array.isArray(timetableData) || timetableData.length === 0) {
+    console.warn("⚠️ No timetable entries returned from TTMS");
+    this.timetable = [];
+    this.totalStudents = 0;
+    return; // STOP here – do NOT try course-based method
+}
+
+// Convert TTMS jadual_subjek entries → UI format
+const toEntry = (e) => ({
+    day: e.hari || e.day || e.nama_hari || "",
+    time: e.masa || e.time || e.masa_mula || "",
+    endTime: e.masa_tamat || e.end_time || "",
+    subject: e.nama_subjek || "",
+    kod_subjek: e.kod_subjek || "",
+    seksyen: e.seksyen || "",
+    room: e.kod_ruang || e.ruang || ""
+});
+
+
+console.log("✅ Lecturer timetable rendered:", this.timetable.length);
+
                                         
                                     } else if (user.role === 'admin') {
                                         // Admin can view any timetable (optional)
@@ -1135,26 +1301,11 @@
                                 console.log('Organized timetable data:', this.organizedData);
                             },
 
-                            mapDay(dayNumber) {
-                                // Handle null/undefined
-                                if (dayNumber === undefined || dayNumber === null) {
-                                    return 'Monday';
-                                }
-                                
-                                const dayNum = Number(dayNumber);
-                                
-                                // Map TTMS day numbers to English days (only Monday-Friday)
-                                const dayMap = {
-                                    2: 'Monday',    // 2 = Isnin
-                                    3: 'Tuesday',   // 3 = Selasa
-                                    4: 'Wednesday', // 4 = Rabu
-                                    5: 'Thursday',  // 5 = Khamis
-                                    6: 'Friday'     // 6 = Jumaat
-                                    // Skip 1 = Ahad (Sunday)
-                                };
-                                
-                                return dayMap[dayNum] || null; // Return null for Sunday/Saturday
-                            },
+mapDay(dayNumber) {
+  const dayMap = {1:"Monday",2:"Tuesday",3:"Wednesday",4:"Thursday",5:"Friday"};
+  return dayMap[Number(dayNumber)] || null;
+},
+
                             
                             parseTime(timeSlotNumber) {
                                 // Handle null/undefined
@@ -1278,7 +1429,7 @@
                                     if (user.role === 'student') {
                                         results = await TTMS.detectStudentClashes(user.username);
                                     } else if (user.role === 'lecturer') {
-                                        results = await TTMS.detectLecturerClashes(user.username);
+                                        results = await TTMS.detectLecturerClashes(user.login_name || user.username);
                                     } else {
                                         results = await TTMS.detectSystemClashes();
                                     }

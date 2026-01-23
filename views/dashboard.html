@@ -21,10 +21,14 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted mb-2">My Courses</h6>
+                            <small class="text-muted d-block mb-1">
+                            <span v-if="$parent.user.role === 'lecturer'">Teaching Courses</span>
+                            <span v-else>My Courses</span>
+                            </small>
                             <h2 class="fw-bold text-primary mb-0">{{ stats.myCourses }}</h2>
                             <small class="text-muted">Current session</small>
                         </div>
+
                         <div class="stat-icon bg-primary bg-opacity-10 text-primary">
                             <i class="fas fa-book"></i>
                         </div>
@@ -56,7 +60,7 @@
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="text-muted mb-2">Total Students</h6>
-                            <h2 class="fw-bold text-info mb-0">1711</h2> <!--{{ stats.totalStudents}}-->
+                            <h2 class="fw-bold text-info mb-0">{{ stats.totalStudents}}</h2> 
                             <small class="text-muted">Registered</small>
                         </div>
                         <div class="stat-icon bg-info bg-opacity-10 text-info">

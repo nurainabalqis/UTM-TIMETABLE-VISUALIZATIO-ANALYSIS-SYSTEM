@@ -168,29 +168,27 @@
                     
                     console.log('✅ TTMS login successful');
                     
-                    // Step 2: Detect user role from authentication response
-                    console.log('🔍 Step 2: Detecting user role from description...');
-                    console.log('Description from TTMS:', loginResponse.description);
-                    
-                    const role = detectRoleFromDescription(loginResponse.description);
-                    
-                    console.log(`✅ Role detected: ${role}`);
-                    
-                    // Step 3: Create user object and save to localStorage
-                    const user = {
-                        username: username,
-                        name: loginResponse.nama || username,
-                        role: role,
-                        description: role.charAt(0).toUpperCase() + role.slice(1),
-                        loginTime: new Date().toISOString(),
-                        session_id: loginResponse.session_id
-                    };
-                    
-                    localStorage.setItem("user", JSON.stringify(user));
-                    TTMS.setCurrentSession('2025/2026', '1');
-                    
-                    console.log('✅ User saved:', user);
-                    
+// Step 2: Detect user role
+const role = loginResponse.role || detectRoleFromDescription(loginResponse.description);
+
+// Step 3: Create user object and save to localStorage
+const user = {
+  username: username,
+  name: loginResponse.nama || username,
+  role: role,
+  description: role.charAt(0).toUpperCase() + role.slice(1),
+  loginTime: new Date().toISOString(),
+
+  // IMPORTANT: TTMS.login() returns user_session_id/admin_session_id (not session_id)
+  session_id: loginResponse.user_session_id || loginResponse.session_id || null,
+  user_session_id: loginResponse.user_session_id || null,
+  admin_session_id: loginResponse.admin_session_id || null,
+  login_name: loginResponse.login_name || null
+};
+
+localStorage.setItem("user", JSON.stringify(user));
+TTMS.setCurrentSession('2025/2026', '1');
+  
                     // Step 4: Show success message with role indicator
                     const roleIndicatorClass = 
                         role === 'student' ? 'student-indicator' : 

@@ -297,9 +297,32 @@ const TTMS = {
         });
     },
 
-    async fetchRooms() {
-        return await this.fetchWithAdminSession('ruang');
-    },
+async fetchRooms() {
+  // Restrict rooms to Faculty of Computing buildings only (N28 & N28A)
+  const rooms = await this.fetchWithAdminSession('ruang');
+
+  const isFCRoom = (code) => {
+    if (!code) return false;
+    const k = String(code).trim().toUpperCase();
+
+    // Typical TTMS room codes: N28-101, N28A-202, etc.
+    return (
+      k.startsWith('N28A') ||
+      k.startsWith('N28-') ||
+      k.startsWith('N28 ') ||
+      k === 'N28' ||
+      k.startsWith('N28')
+    );
+  };
+
+  const filtered = Array.isArray(rooms)
+    ? rooms.filter(r => isFCRoom(r.kod_ruang || r.kod_bilik || r.kod || r.ruang))
+    : [];
+
+  console.log(`🏫 Rooms filtered to N28/N28A: ${filtered.length}/${Array.isArray(rooms) ? rooms.length : 0}`);
+  return filtered;
+},
+
 
     async fetchRoomSchedule(roomCode, sesi = null, semester = null) {
         const params = { kod_ruang: roomCode };
@@ -314,163 +337,141 @@ const TTMS = {
     },
 
     // Fetch lecturer subjects
-    async fetchLecturerSubjects(lecturerId) {
-        try {
-            const params = {
-                entity: 'pensyarah_subjek',
-                no_pekerja: lecturerId
-            };
-            
-            return await this.fetchWithAdminSession('pensyarah_subjek', params);
-            
-        } catch (error) {
-            console.error('Error fetching lecturer subjects:', error);
-            return [];
-        }
-    },
-
-    async fetchLecturerTimetable(lecturerId) {
+async fetchLecturerSubjects(lecturerId) {
     try {
-        console.log('👨‍🏫 Fetching lecturer timetable for:', lecturerId);
-        
-        // Get current session
         const currentSession = this.getCurrentSession();
-        
-        // Method 1: Try to get from pensyarah_subjek endpoint
-        try {
-            const lecturerSubjects = await this.fetchWithAdminSession('pensyarah_subjek', {
-                no_pekerja: lecturerId
+
+        // Try multiple possible keys used by TTMS
+        const tries = [
+            { no_pekerja: lecturerId },
+            { kod_pensyarah: lecturerId },
+            { login_name: lecturerId },
+            { no_kp: lecturerId }
+        ];
+
+        for (const p of tries) {
+            const res = await this.fetchWithAdminSession('pensyarah_subjek', {
+                ...p,
+                sesi: currentSession.sesi,
+                semester: currentSession.semester
             });
-            
-            console.log(`📚 Lecturer subjects found: ${lecturerSubjects.length}`);
-            
-            // Filter for current session
-            const currentSubjects = lecturerSubjects.filter(subject => 
-                subject.sesi === currentSession.sesi && 
-                subject.semester.toString() === currentSession.semester
-            );
-            
-            console.log(`📅 Current session subjects: ${currentSubjects.length}`);
-            
-            // Get schedule for each subject
-            const timetableData = [];
-            for (const subject of currentSubjects) {
-                try {
-                    const schedule = await this.fetchCourseSchedule(
-                        subject.kod_subjek,
-                        currentSession.sesi,
-                        currentSession.semester,
-                        subject.seksyen
-                    );
-                    
-                    if (schedule && schedule.length > 0) {
-                        timetableData.push({
-                            courseCode: subject.kod_subjek,
-                            courseName: subject.nama_subjek,
-                            section: subject.seksyen,
-                            studentCount: subject.bil_pelajar || 0,
-                            schedule: schedule
-                        });
-                        console.log(`✅ Added: ${subject.kod_subjek} (${subject.seksyen}) - ${schedule.length} sessions`);
-                    }
-                } catch (error) {
-                    console.warn(`⚠️ Could not fetch schedule for ${subject.kod_subjek}:`, error.message);
-                }
+
+            if (Array.isArray(res) && res.length > 0) {
+                console.log('✅ fetchLecturerSubjects success with param:', p, 'count:', res.length);
+                return res;
             }
-            
-            if (timetableData.length > 0) {
-                console.log(`✅ Lecturer timetable loaded: ${timetableData.length} subjects`);
-                return timetableData;
-            }
-            } catch (error) {
-                console.warn('⚠️ Method 1 failed:', error.message);
-            }
-            
-            // Method 2: Try to get from courses where lecturer is assigned
-            try {
-                console.log('🔄 Trying Method 2: Fetching all courses...');
-                const allCourses = await this.fetchCourses(currentSession.sesi, currentSession.semester);
-                
-                // Filter courses taught by this lecturer
-                const lecturerCourses = allCourses.filter(course => {
-                    // Check various lecturer ID fields
-                    return course.kod_pensyarah === lecturerId || 
-                        course.no_pekerja === lecturerId ||
-                        (course.nama_pensyarah && course.nama_pensyarah.includes(lecturerId));
-                });
-                
-                console.log(`📚 Courses found for lecturer: ${lecturerCourses.length}`);
-                
-                // Get unique courses (group by course code and section)
-                const uniqueCourses = [];
-                const courseKeySet = new Set();
-                
-                lecturerCourses.forEach(course => {
-                    const key = `${course.kod_subjek}-${course.seksyen || '1'}`;
-                    if (!courseKeySet.has(key)) {
-                        courseKeySet.add(key);
-                        uniqueCourses.push(course);
-                    }
-                });
-                
-                // Build timetable data
-                const timetableData = [];
-                for (const course of uniqueCourses) {
-                    try {
-                        const schedule = await this.fetchCourseSchedule(
-                            course.kod_subjek,
-                            currentSession.sesi,
-                            currentSession.semester,
-                            course.seksyen
-                        );
-                        
-                        if (schedule && schedule.length > 0) {
-                            timetableData.push({
-                                courseCode: course.kod_subjek,
-                                courseName: course.nama_subjek,
-                                section: course.seksyen || '1',
-                                studentCount: course.bil_pelajar || 0,
-                                schedule: schedule
-                            });
-                        } else {
-                            // If no schedule from API, create from course data
-                            if (course.hari && course.masa) {
-                                timetableData.push({
-                                    courseCode: course.kod_subjek,
-                                    courseName: course.nama_subjek,
-                                    section: course.seksyen || '1',
-                                    studentCount: course.bil_pelajar || 0,
-                                    schedule: [{
-                                        hari: course.hari,
-                                        masa: course.masa,
-                                        kod_bilik: course.kod_bilik,
-                                        ruang: course.kod_bilik ? { kod_ruang: course.kod_bilik } : null
-                                    }]
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        console.warn(`⚠️ Could not process ${course.kod_subjek}:`, error.message);
-                    }
-                }
-                
-                if (timetableData.length > 0) {
-                    console.log(`✅ Lecturer timetable (Method 2): ${timetableData.length} courses`);
-                    return timetableData;
-                }
-                
-            } catch (error) {
-                console.warn('⚠️ Method 2 failed:', error.message);
-            }
-            
-            console.log('⚠️ No timetable data found for lecturer');
-            return [];
-            
-        } catch (error) {
-            console.error('❌ Error fetching lecturer timetable:', error);
-            return [];
         }
-    },
+
+        console.warn('⚠️ fetchLecturerSubjects: no subjects found for', lecturerId);
+        return [];
+    } catch (error) {
+        console.error('❌ Error fetching lecturer subjects:', error);
+        return [];
+    }
+},
+
+async fetchSubjectSections(sesi, semester) {
+    try {
+        return await this.fetchWithAdminSession("subjek_seksyen", { sesi, semester });
+    } catch (e) {
+        console.error("❌ fetchSubjectSections error:", e);
+        return [];
+    }
+},
+
+async fetchSubjects(sesi, semester) {
+    try {
+        // entity=subjek tak perlukan session_id
+        return await this.fetch('subjek', { sesi, semester });
+    } catch (e) {
+        console.error("❌ fetchSubjects error:", e);
+        return [];
+    }
+},
+
+
+async fetchLecturerTimetable(lecturerId, lecturerName = "") {
+    try {
+        const { sesi, semester } = this.getCurrentSession();
+
+        const norm = (s) => String(s || "")
+            .toUpperCase()
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const tokens = norm(lecturerName).split(" ").filter(Boolean);
+
+        const nameMatch = (candidate) => {
+            const c = norm(candidate);
+            if (!c || tokens.length === 0) return false;
+            return tokens.every(t => c.includes(t));
+        };
+
+        console.log("📌 fetchLecturerTimetable:", lecturerId, lecturerName, sesi, semester);
+
+        // 1) Get all subjects
+        const subjects = await this.fetchWithAdminSession("subjek", { sesi, semester });
+        if (!Array.isArray(subjects) || subjects.length === 0) return [];
+
+        // 2) Fetch ALL subjek_pensyarah in parallel
+        const lecturerMaps = await Promise.all(
+            subjects.map(s =>
+                this.fetchWithAdminSession("subjek_pensyarah", {
+                    kod_subjek: s.kod_subjek,
+                    sesi,
+                    semester
+                }).then(list => ({ subject: s, list }))
+                 .catch(() => null)
+            )
+        );
+
+        // 3) Collect ALL jadual_subjek calls
+        const jadualCalls = [];
+
+        lecturerMaps.forEach(entry => {
+            if (!entry || !Array.isArray(entry.list)) return;
+
+            const { subject, list } = entry;
+
+            const mySections = list.filter(l => nameMatch(l.nama));
+
+            mySections.forEach(m => {
+                const seksyen = String(m.seksyen || "").trim();
+                if (!seksyen) return;
+
+                jadualCalls.push(
+                    this.fetchWithAdminSession("jadual_subjek", {
+                        kod_subjek: subject.kod_subjek,
+                        seksyen,
+                        sesi,
+                        semester
+                    }).then(jadual =>
+                        Array.isArray(jadual)
+                            ? jadual.map(j => ({
+                                ...j,
+                                kod_subjek: subject.kod_subjek,
+                                seksyen,
+                                nama_subjek: subject.nama_subjek || j.nama_subjek || ""
+                            }))
+                            : []
+                    ).catch(() => [])
+                );
+            });
+        });
+
+        // 4) Fetch ALL jadual_subjek in parallel
+        const results = await Promise.all(jadualCalls);
+
+        const timetableEntries = results.flat();
+
+        console.log("✅ Lecturer timetable entries:", timetableEntries.length);
+        return timetableEntries;
+
+    } catch (e) {
+        console.error("❌ fetchLecturerTimetable error:", e);
+        return [];
+    }
+},
 
     // ✅ Lecturer full timetable (best source for jenis + hari)
     async fetchLecturerTimetableSlots(lecturerId, sesi = null, semester = null) {
@@ -1465,3 +1466,4 @@ if (typeof window !== 'undefined') {
     TTMS.init(); // Load session IDs from localStorage
     console.log('✅ TTMS Model loaded and initialized');
 }
+

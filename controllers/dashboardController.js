@@ -499,3 +499,4 @@ const DashboardController = {
 
 // Make globally available
 window.DashboardController = DashboardController;
+
