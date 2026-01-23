@@ -218,85 +218,81 @@ class AnalysisController {
 
     // DRAW DAILY DISTRIBUTION CHART
 
-async drawDailyDistributionChart() {
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (!user) {
-        console.warn('User not found in localStorage');
-        return;
-    }
+    async drawDailyDistributionChart() {
+        const user = JSON.parse(localStorage.getItem("user"));
+        if (!user) {
+            console.warn("User not found in localStorage");
+            return;
+        }
 
-    const canvas = document.getElementById('dailyDistributionChart');
-    if (!canvas) {
-        console.warn('dailyDistributionChart canvas not found');
-        return;
-    }
+        const canvas = document.getElementById("dailyDistributionChart");
+        if (!canvas) {
+            console.warn("dailyDistributionChart canvas not found");
+            return;
+        }
 
-    if (typeof Chart === 'undefined') {
-        console.error('❌ Chart.js is not available');
-        canvas.parentElement.innerHTML = `
+        if (typeof Chart === "undefined") {
+            console.error("❌ Chart.js is not available");
+            canvas.parentElement.innerHTML = `
             <div class="alert alert-warning">
                 <i class="fas fa-exclamation-triangle me-2"></i>
                 Chart.js library is not loaded. Please refresh the page.
             </div>
-        `;
-        return;
-    }
-
-    if (this.isDrawingDaily) {
-        console.warn('⏳ Daily distribution chart already drawing, skipping...');
-        return;
-    }
-    this.isDrawingDaily = true;
-
-    try {
-        // Destroy old chart
-        if (this.charts.daily) {
-            this.charts.daily.destroy();
-            this.charts.daily = null;
+            `;
+            return;
         }
 
-        // TTMS weekday mapping
-        const days = [
-            { num: 2, label: 'Monday' },
-            { num: 3, label: 'Tuesday' },
-            { num: 4, label: 'Wednesday' },
-            { num: 5, label: 'Thursday' },
-            { num: 6, label: 'Friday' }
-        ];
+        if (this.isDrawingDaily) {
+            console.warn("⏳ Daily distribution chart already drawing, skipping...");
+            return;
+        }
+        this.isDrawingDaily = true;
 
-        const labels = [];
-        const lecture = [];
-        const tutorial = [];
-        const lab = [];
-        const other = [];
+        try {
+            // Destroy old chart
+            if (this.charts?.daily) {
+            this.charts.daily.destroy();
+            this.charts.daily = null;
+            }
 
-        // ===============================
-        // 🔥 FIX: FETCH TTMS DATA ONCE
-        // ===============================
-        const { sesi, semester } = TTMS.getCurrentSession();
+            // TTMS weekday mapping
+            const days = [
+            { num: 2, label: "Monday" },
+            { num: 3, label: "Tuesday" },
+            { num: 4, label: "Wednesday" },
+            { num: 5, label: "Thursday" },
+            { num: 6, label: "Friday" },
+            ];
 
-        const subjects = user.role === 'student'
-            ? await TTMS.fetchMyCourses(user.username)
-            : await TTMS.fetchLecturerSubjects(user.username);
+            const labels = [];
 
-        const currentSubjects = subjects.filter(s =>
-            s.sesi === sesi && String(s.semester) === String(semester)
-        );
+            // ===============================
+            // 🔥 FETCH TTMS DATA ONCE
+            // ===============================
+            const { sesi, semester } = TTMS.getCurrentSession();
 
-        // Daily accumulator
-        const dailyMap = {
+            const subjects =
+            user.role === "student"
+                ? await TTMS.fetchMyCourses(user.username)
+                : await TTMS.fetchLecturerSubjects(user.username);
+
+            const currentSubjects = subjects.filter(
+            (s) => s.sesi === sesi && String(s.semester) === String(semester)
+            );
+
+            // Daily accumulator (keep types internally for insights + tooltip details if needed)
+            const dailyMap = {
             2: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
             3: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
             4: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
             5: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
-            6: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} }
-        };
+            6: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
+            };
 
-
-        // ===============================
-        // 🔥 AGGREGATE LOCALLY (NO RACES)
-        // ===============================
-        for (const subject of currentSubjects) {
+            // ===============================
+            // 🔥 AGGREGATE LOCALLY (NO RACES)
+            // ===============================
+            for (const subject of currentSubjects) {
             if (!subject.kod_subjek || !subject.seksyen) continue;
 
             const timetable = await TTMS.fetchCourseSchedule(
@@ -308,162 +304,158 @@ async drawDailyDistributionChart() {
 
             if (!Array.isArray(timetable)) continue;
 
-            timetable.forEach(slot => {
+            timetable.forEach((slot) => {
                 const day = Number(slot.hari);
                 if (!dailyMap[day]) return;
 
-                const type = this.inferSessionCategory(slot, subject);
+                const type = this.inferSessionCategory(slot, subject); // 'lecture'|'tutorial'|'lab'|'other'
 
-                // total sessions (hours)
+                // total sessions (hours) by type (still tracked internally)
                 dailyMap[day][type]++;
 
                 // per-class hours
                 const classKey = `${subject.kod_subjek} (${subject.seksyen})`;
+                dailyMap[day].classes[classKey] = (dailyMap[day].classes[classKey] || 0) + 1;
+            });
+            }
 
-                if (!dailyMap[day].classes[classKey]) {
-                    dailyMap[day].classes[classKey] = 0;
-                }
-                dailyMap[day].classes[classKey]++;
+            // Labels
+            for (const day of days) labels.push(day.label);
+
+            // ===============================
+            // ✅ BUILD TOTALS ONLY (single dataset)
+            // ===============================
+            const totalsByDay = days.map((d) => {
+            const x = dailyMap[d.num];
+            return (x.lecture || 0) + (x.tutorial || 0) + (x.lab || 0) + (x.other || 0);
             });
 
-        }
+            // ===============================
+            // AUTOMATED INSIGHTS (updated to use totalsByDay)
+            // ===============================
+            const busiestIndex = totalsByDay.indexOf(Math.max(...totalsByDay));
 
-        // Push data into arrays
-        for (const day of days) {
-            labels.push(day.label);
-            lecture.push(dailyMap[day.num].lecture);
-            tutorial.push(dailyMap[day.num].tutorial);
-            lab.push(dailyMap[day.num].lab);
-            other.push(dailyMap[day.num].other);
-        }
-
-        // ===============================
-        // AUTOMATED INSIGHTS (UNCHANGED)
-        // ===============================
-        const totalsByDay = labels.map((_, i) =>
-            lecture[i] + tutorial[i] + lab[i] + other[i]
-        );
-
-        const busiestIndex = totalsByDay.indexOf(Math.max(...totalsByDay));
-
-        const nonZeroTotals = totalsByDay
+            const nonZeroTotals = totalsByDay
             .map((v, i) => ({ v, i }))
-            .filter(o => o.v > 0);
+            .filter((o) => o.v > 0);
 
-        const lightestIndex = nonZeroTotals.length
+            const lightestIndex = nonZeroTotals.length
             ? nonZeroTotals.reduce((a, b) => (b.v < a.v ? b : a)).i
             : -1;
 
-        const freeEl = document.getElementById('insight-free');
-        const freeDays = labels
+            const freeEl = document.getElementById("insight-free");
+            const freeDays = labels
             .map((day, i) => ({ day, total: totalsByDay[i] }))
-            .filter(x => x.total === 0)
-            .map(x => x.day);
+            .filter((x) => x.total === 0)
+            .map((x) => x.day);
 
-        if (freeEl) {
+            if (freeEl) {
             freeEl.textContent = freeDays.length
-                ? `No-class day(s): ${freeDays.join(', ')}`
-                : 'No-class day(s): —';
-        }
+                ? `No-class day(s): ${freeDays.join(", ")}`
+                : "No-class day(s): —";
+            }
 
-        const totalsByType = {
-            Lecture: lecture.reduce((a, b) => a + b, 0),
-            Tutorial: tutorial.reduce((a, b) => a + b, 0),
-            Lab: lab.reduce((a, b) => a + b, 0),
-            Others: other.reduce((a, b) => a + b, 0)
-        };
+            // If you still want dominantType insight, keep it (optional)
+            const totalsByType = {
+            Lecture: days.reduce((sum, d) => sum + (dailyMap[d.num].lecture || 0), 0),
+            Tutorial: days.reduce((sum, d) => sum + (dailyMap[d.num].tutorial || 0), 0),
+            Lab: days.reduce((sum, d) => sum + (dailyMap[d.num].lab || 0), 0),
+            Others: days.reduce((sum, d) => sum + (dailyMap[d.num].other || 0), 0),
+            };
 
-        const dominantType = Object.entries(totalsByType)
-            .reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+            const dominantType = Object.entries(totalsByType).reduce(
+            (a, b) => (b[1] > a[1] ? b : a),
+            ["—", 0]
+            )[0];
 
-        const busiestEl = document.getElementById('insight-busiest');
-        const lightestEl = document.getElementById('insight-lightest');
-        const dominantEl = document.getElementById('insight-dominant');
+            const busiestEl = document.getElementById("insight-busiest");
+            const lightestEl = document.getElementById("insight-lightest");
+            const dominantEl = document.getElementById("insight-dominant");
 
-        if (busiestEl) {
+            if (busiestEl) {
             busiestEl.innerHTML = `<i class="fas fa-circle text-danger me-2"></i>
                 Busiest Day: ${labels[busiestIndex]} (highest total sessions)`;
-        }
+            }
 
-        if (lightestEl) {
-            lightestEl.innerHTML = lightestIndex >= 0
+            if (lightestEl) {
+            lightestEl.innerHTML =
+                lightestIndex >= 0
                 ? `<i class="fas fa-circle text-success me-2"></i>
-                   Lightest Day: ${labels[lightestIndex]} (lowest total sessions)`
+                    Lightest Day: ${labels[lightestIndex]} (lowest total sessions)`
                 : `<i class="fas fa-circle text-success me-2"></i>
-                   Lightest Day: —`;
-        }
+                    Lightest Day: —`;
+            }
 
-        if (dominantEl) {
-            dominantEl.textContent =
-                `Primary Workload Type: ${dominantType} (largest weekly contribution)`;
-        }
+            if (dominantEl) {
+            dominantEl.textContent = `Primary Workload Type: ${dominantType} (largest weekly contribution)`;
+            }
 
-        // ===============================
-        // RENDER CHART
-        // ===============================
-        this.charts.daily = new Chart(canvas, {
-            type: 'bar',
+            // ===============================
+            // ✅ RENDER CHART (single dataset, no legend, one color)
+            // ===============================
+            this.charts.daily = new Chart(canvas, {
+            type: "bar",
             data: {
                 labels,
                 datasets: [
-                    { label: 'Lecture', data: lecture, backgroundColor: '#1976D2' },
-                    { label: 'Tutorial', data: tutorial, backgroundColor: '#4CAF50' },
-                    { label: 'Lab', data: lab, backgroundColor: '#FF9800' },
-                    { label: 'Others', data: other, backgroundColor: '#9C27B0' }
-                ]
+                {
+                    data: totalsByDay,
+                    backgroundColor: "#1976D2", // one color
+                    borderRadius: 6,
+                },
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { stacked: true },
-                    y: {
-                        stacked: true,
-                        beginAtZero: true,
-                        max: 8,
-                        title: { display: true, text: 'Hours per Day' }
-                    }
+                x: { stacked: false },
+                y: {
+                    stacked: false,
+                    beginAtZero: true,
+                    max: 8,
+                    title: { display: true, text: "Total Hours per Day" },
+                },
                 },
                 plugins: {
-                    title: {
-                        display: true,
-                        text: user.role === 'student'
-                            ? 'My Daily Class Workload Distribution (Sessions)'
-                            : 'My Daily Teaching Workload Distribution (Sessions)'
+                title: {
+                    display: true,
+                    text:
+                    user.role === "student"
+                        ? "My Daily Class Workload (Total Sessions)"
+                        : "My Daily Teaching Workload (Total Sessions)",
+                },
+                legend: {
+                    display: false, // ✅ removes label box completely
+                },
+                tooltip: {
+                    callbacks: {
+                    label: (ctx) => {
+                        const dayIndex = ctx.dataIndex;
+                        const dayNum = days[dayIndex].num;
+
+                        const totalHours = ctx.raw;
+                        const classesObj = dailyMap[dayNum].classes;
+                        const classLines = Object.entries(classesObj).map(
+                        ([name, hrs]) => `• ${name}: ${hrs} hr(s)`
+                        );
+
+                        return [`Total: ${totalHours} hr(s)`, ...classLines];
                     },
-                    tooltip: {
-                        callbacks: {
-                            label: ctx => {
-                                const dayIndex = ctx.dataIndex;
-                                const dayNum = days[dayIndex].num;
+                    },
+                },
+                },
+            },
+            });
 
-                                const sessionCount = ctx.raw;
-                                const classesObj = dailyMap[dayNum].classes;
-                                const classCount = Object.keys(classesObj).length;
-
-                                const classLines = Object.entries(classesObj)
-                                    .map(([name, hrs]) => `• ${name}: ${hrs} hr(s)`);
-
-                                return [
-                                    `${ctx.dataset.label}: ${sessionCount} hr(s)`,
-                                    `Classes: ${classCount}`,
-                                    ...classLines
-                                ];
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        console.log('✅ Daily distribution chart rendered (FIXED, STABLE)');
-
-    } catch (err) {
-        console.error('❌ Daily distribution chart error:', err);
-    } finally {
-        this.isDrawingDaily = false;
+            console.log("✅ Daily total chart rendered (single dataset)");
+        } catch (err) {
+            console.error("❌ Daily distribution chart error:", err);
+        } finally {
+            this.isDrawingDaily = false;
+        }
     }
-}
+
     async getPeakHoursFromMyTimetable(user) {
     const { sesi, semester } = TTMS.getCurrentSession();
 
