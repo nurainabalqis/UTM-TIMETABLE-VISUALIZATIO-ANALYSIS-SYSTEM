@@ -824,6 +824,15 @@ this.stats.totalStudents = matricSet.size;
 
                         async mounted() {
                             await this.loadAllCourses();
+
+                            this.$nextTick(() => {
+                                const tooltipTriggerList = [].slice.call(
+                                    document.querySelectorAll('[data-bs-toggle="tooltip"]')
+                                );
+                                tooltipTriggerList.forEach(el => {
+                                    new bootstrap.Tooltip(el);
+                                });
+                            });
                         },
 
                         methods: {
@@ -892,6 +901,38 @@ this.stats.totalStudents = matricSet.size;
                                         this.stats.totalStudents = 0;
                                     }
 
+                                    // ✅ Active lecturers (from pensyarah list page)
+                                    try {
+                                    const lecturers = await TTMS.fetchLecturers(); // entity=pensyarah
+
+                                    const activeSet = new Set(
+                                        (lecturers || [])
+                                        .filter(l => {
+                                            const bilSubjek = Number(l.bil_subjek || 0);
+                                            const bilSeksyen = Number(l.bil_seksyen || 0);
+                                            const bilPelajar = Number(l.bil_pelajar || 0);
+
+                                            // "Active" = has teaching load this session
+                                            return bilSubjek > 0 || bilSeksyen > 0 || bilPelajar > 0;
+                                        })
+                                        .map(l =>
+                                            String(
+                                            l.no_pekerja ||
+                                            l.kod_pensyarah ||
+                                            l.login_name ||
+                                            l.nama ||            // TTMS page shows "Nama"
+                                            ""
+                                            ).trim()
+                                        )
+                                        .filter(Boolean)
+                                    );
+
+                                    this.stats.totalLecturers = activeSet.size;
+                                    } catch (e) {
+                                    console.warn("⚠️ Unable to fetch lecturers count:", e);
+                                    this.stats.totalLecturers = 0;
+                                    }
+
                                     // ---- APPLY FILTERS LAST ----
                                     this.applyFilters();
 
@@ -904,15 +945,13 @@ this.stats.totalStudents = matricSet.size;
                             },
 
                             recomputeSummaryStats() {
-                                const list = Array.isArray(this.filteredCourses) ? this.filteredCourses : [];
+                                const list = Array.isArray(this.filteredCourses)
+                                    ? this.filteredCourses
+                                    : [];
 
-                                // Active courses: bil_pelajar > 0
-                                this.stats.activeCourses = list.filter(c => Number(c.bil_pelajar || 0) > 0).length;
-
-                                // Total lecturers: count rows that have any lecturer value (not unique)
-                                this.stats.totalLecturers = list.filter(c =>
-                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim() !== "" &&
-                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim().toUpperCase() !== "N/A"
+                                // 1️⃣ Active courses
+                                this.stats.activeCourses = list.filter(
+                                    c => Number(c.bil_pelajar || 0) > 0
                                 ).length;
                             },
 
