@@ -245,6 +245,56 @@ const TTMS = {
         }
     },
 
+    async fetchPublic(entity, params = {}) {
+        try {
+            const currentSession = this.getCurrentSession();
+            const baseParams = {
+            entity,
+            sesi: params.sesi || currentSession.sesi,
+            semester: params.semester || currentSession.semester,
+            ...params
+            };
+
+            Object.keys(baseParams).forEach((k) => {
+            if (baseParams[k] === undefined || baseParams[k] === null) delete baseParams[k];
+            });
+
+            const queryString = Object.entries(baseParams)
+            .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+            .join("&");
+
+            const url = `${this.BASE_URL}?${queryString}`;
+            console.log(`📡 Fetching PUBLIC ${entity}:`, url);
+
+            const response = await fetch(url);
+            const text = await response.text();
+
+            console.log(`📥 Raw PUBLIC response for ${entity}:`, text.substring(0, 200));
+
+            let data;
+            try {
+            data = JSON.parse(text);
+            } catch (parseError) {
+            const jsonMatch = text.match(/\[.*\]|\{.*\}/s);
+            if (!jsonMatch) return [];
+            data = JSON.parse(jsonMatch[0]);
+            }
+
+            if (Array.isArray(data)) return data;
+            if (data && typeof data === "object") {
+            if (data[entity] && Array.isArray(data[entity])) return data[entity];
+            const values = Object.values(data);
+            if (values.length > 0 && Array.isArray(values[0])) return values[0];
+            return values;
+            }
+
+            return [];
+        } catch (e) {
+            console.error(`❌ fetchPublic(${entity}) error:`, e);
+            return [];
+        }
+    },
+
     // ============ SPECIFIC ENTITY FETCHERS ============
 
     async fetchCourseSchedule(courseCode, sesi = null, semester = null, section = null) {

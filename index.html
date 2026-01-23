@@ -614,6 +614,16 @@ this.stats.totalStudents = matricSet.size;
                 async loadMyCourses() {
                     const response = await fetch('views/mycourses.html');
                     const template = await response.text();
+
+                    const FACULTY_MAP = {
+                        FSKSM: ['SCSE', 'SEC', 'MCS', 'MEC', 'SECJ', 'SECV', 'SECR', 'SECP'], // include your common SEC* too
+                        FKE: ['ELE', 'EEE'],
+                        FKM: ['MEC'],
+                        FAB: ['UHB', 'UHL'],
+                        FPPSM: ['UHLB'],
+                        FKKKSA: ['CHE'],
+                        PPIPS: ['SSH']
+                    };
                     
                     this.components.mycourses = {
                         template,
@@ -622,7 +632,7 @@ this.stats.totalStudents = matricSet.size;
                                 courses: [],
                                 filteredCourses: [],
                                 filterSession: 'current',
-                                filterStatus: 'all',
+                                searchTerm: '',
                                 isLoading: true
                             };
                         },
@@ -632,58 +642,120 @@ this.stats.totalStudents = matricSet.size;
                         methods: {
                             async loadStudentCourses() {
                                 this.isLoading = true;
+
                                 try {
-                                    const user = JSON.parse(localStorage.getItem('user'));
+                                    const user = JSON.parse(localStorage.getItem("user"));
                                     const allCourses = await TTMS.fetchMyCourses(user.username);
-                                    
-                                    const currentSession = JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
-                                    this.courses = allCourses.map(course => ({
+
+                                    const currentSession =
+                                    JSON.parse(localStorage.getItem("currentSession")) || {
+                                        sesi: "2025/2026",
+                                        semester: "1"
+                                    };
+
+                                    const norm = (v) => String(v ?? "").trim().toUpperCase();
+                                    const keyOf = (code, sec) => `${norm(code)}-${String(sec ?? "").trim()}`;
+
+                                    // 1) collect unique subject codes from registered courses
+                                    const uniqueCodes = Array.from(
+                                    new Set((allCourses || []).map(c => norm(c.kod_subjek)).filter(Boolean))
+                                    );
+
+                                    // 2) fetch lecturer lists per subject (subjek_pensyarah) and build map (kod_subjek+seksyen -> nama)
+                                    const lecturerByCourseSection = {};
+
+                                    await Promise.all(
+                                    uniqueCodes.map(async (code) => {
+                                        try {
+                                        const list = await TTMS.fetchWithAdminSession("subjek_pensyarah", {
+                                            kod_subjek: code,
+                                            sesi: currentSession.sesi,
+                                            semester: currentSession.semester
+                                        });
+
+                                        if (!Array.isArray(list)) return;
+
+                                            list.forEach((row) => {
+                                                if (!row || !row.seksyen || !row.nama) return;
+
+                                                const sec = String(row.seksyen).trim();
+                                                const name = String(row.nama).trim();
+                                                if (!sec || !name || name === "-") return;
+
+                                                lecturerByCourseSection[keyOf(code, sec)] = name;
+                                            });
+                                        } catch (e) {
+                                            console.warn("subjek_pensyarah failed for", code, e);
+                                        }
+                                    })
+                                    );
+
+                                    // 3) attach lecturer name into each registered course row
+                                    this.courses = (allCourses || []).map((course) => {
+                                    const code = norm(course.kod_subjek);
+                                    const sec = String(course.seksyen ?? "").trim();
+
+                                    return {
                                         ...course,
-                                        isCurrent: course.sesi === currentSession.sesi && 
-                                                  course.semester.toString() === currentSession.semester
-                                    }));
-                                    
+                                        nama_pensyarah: lecturerByCourseSection[keyOf(code, sec)] ?? null,
+                                        isCurrent:
+                                        course.sesi === currentSession.sesi &&
+                                        String(course.semester) === String(currentSession.semester)
+                                    };
+                                    });
+
                                     this.applyFilters();
-                                    
                                 } catch (error) {
-                                    console.error('Error loading student courses:', error);
-                                    this.$parent.showAlert('Failed to load courses: ' + error.message, 'danger');
+                                    console.error("Error loading student courses:", error);
+                                    this.$parent.showAlert("Failed to load courses: " + error.message, "danger");
                                 } finally {
                                     this.isLoading = false;
                                 }
                             },
                             
                             applyFilters() {
-                                const currentSession = JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
-                                
+                                const currentSession =
+                                    JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
+
+                                const term = (this.searchTerm || '').toLowerCase().trim();
+
                                 this.filteredCourses = this.courses.filter(course => {
-                                    let sessionMatch = true;
-                                    let statusMatch = true;
-                                    
                                     // Session filter
+                                    let sessionMatch = true;
+
                                     if (this.filterSession === 'current') {
-                                        sessionMatch = course.sesi === currentSession.sesi && 
-                                                      course.semester.toString() === currentSession.semester;
+                                    sessionMatch =
+                                        course.sesi === currentSession.sesi &&
+                                        course.semester.toString() === currentSession.semester;
                                     } else if (this.filterSession !== 'all') {
-                                        const [sesi, semester] = this.filterSession.split('-');
-                                        sessionMatch = course.sesi === sesi && 
-                                                      course.semester.toString() === semester;
+                                    const [sesi, semester] = this.filterSession.split('-');
+                                    sessionMatch = course.sesi === sesi && course.semester.toString() === semester;
                                     }
-                                    
-                                    // Status filter
-                                    if (this.filterStatus !== 'all') {
-                                        statusMatch = course.status === this.filterStatus;
+
+                                    // Search filter
+                                    let searchMatch = true;
+                                    if (term) {
+                                    const code = String(course.kod_subjek || '').toLowerCase();
+                                    const name = String(course.nama_subjek || '').toLowerCase();
+                                    const lecturer = String(course.lecturer || course.nama_pensyarah || '').toLowerCase();
+                                    const section = String(course.seksyen || '').toLowerCase();
+
+                                    searchMatch =
+                                        code.includes(term) ||
+                                        name.includes(term) ||
+                                        lecturer.includes(term) ||
+                                        section.includes(term);
                                     }
-                                    
-                                    return sessionMatch && statusMatch;
+
+                                    return sessionMatch && searchMatch;
                                 });
                             },
                             
                             exportCourses() {
                                 const csvContent = "data:text/csv;charset=utf-8," 
-                                    + "Course Code,Course Name,Section,Session,Year,Status\n"
+                                    + "Course Code,Course Name,Section,Session,Credit,Year,Status\n"
                                     + this.filteredCourses.map(c => 
-                                        `${c.kod_subjek},${c.nama_subjek},${c.seksyen},${c.sesi}-${c.semester},${c.tahun_kursus},${c.status}`
+                                        `${c.kod_subjek},${c.nama_subjek},${c.seksyen},${c.sesi}-${c.semester},${c.kredit ?? ''},${c.tahun_kursus},${c.status}`
                                     ).join("\n");
                                 
                                 const link = document.createElement("a");
