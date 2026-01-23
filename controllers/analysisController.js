@@ -2,12 +2,23 @@
 class AnalysisController {
     constructor() {
         this.charts = {};
+        this.isInitializing = false;
+        this.isDrawingDaily = false;
     }
     
     // Initialize all charts
     async initDashboardCharts() {
+
+        if (this.isInitializing) {
+            
+            console.log('⚠️ Chart initialization already in progress, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         console.log('AnalysisController: Initializing dashboard charts...');
-        
+
         try {
             // Ensure Google Charts is loaded
             if (!window.google || !window.google.charts) {
@@ -27,11 +38,20 @@ class AnalysisController {
                 this.loadPeakHoursChart()
             ]);
 
-            await this.loadWeeklyChartChartJS();
             
+
+            if (typeof Chart === 'undefined') {
+                console.error('❌ Chart.js is not loaded!');
+                return;
+            }
+
+            await this.drawDailyDistributionChart();
+
             console.log('AnalysisController: All charts loaded successfully');
         } catch (error) {
             console.error('AnalysisController: Error initializing charts:', error);
+        } finally {
+            this.isInitializing = false;
         }
     }
     
@@ -73,239 +93,540 @@ class AnalysisController {
             console.error('Error loading workload chart:', error);
         }
     }
-    
-    // Load weekly usage chart
-    async loadWeeklyChartChartJS() {
-    try {
-        console.log('AnalysisController: Drawing WEEKLY chart using Chart.js');
 
-        const user = JSON.parse(localStorage.getItem('user'));
-        if (!user) {
-            console.warn('No user found');
-            return;
-        }
+    getSessionCategory(jenis) {
+        if (!jenis) return 'other';
 
-        const weekly = await TTMS.fetchWeeklyDistributionForUser(user);
-        if (!weekly) {
-            console.warn('No weekly distribution data');
-            return;
-        }
+        const j = String(jenis).toLowerCase();
 
-        // 🔍 Check if weekly data actually has real activity
-        const hasWeeklyActivity = Object.values(weekly).some(day =>
-            day.morning > 0 || day.afternoon > 0 || day.evening > 0
-        );
+        // lecture
+        if (j.includes('kuliah') || j.includes('lecture') || j.includes('kul') || j.includes('lec')) return 'lecture';
 
-        // ❗ STUDENT with NO REAL DATA
-        if (user.role === 'student' && !hasWeeklyActivity) {
-            const canvas = document.getElementById('weeklyChart');
-            if (canvas && canvas.parentElement) {
-                canvas.style.display = 'none';
+        // tutorial
+        if (j.includes('tutorial') || j.includes('tutor') || j.includes('tut')) return 'tutorial';
+        
+        // lab / practical
+        if (j.includes('amali') || j.includes('amal') || j.includes('lab') || j.includes('makmal') || j.includes('practical')) return 'lab';
 
-                // remove old message if any
-                const oldMsg = canvas.parentElement.querySelector('.no-weekly-msg');
-                if (oldMsg) oldMsg.remove();
+        return 'other';
+    }
 
-                const msg = document.createElement('div');
-                msg.className = 'no-weekly-msg text-center py-4 text-muted';
-                msg.innerHTML = `
-                    <i class="fas fa-info-circle fa-2x mb-2"></i><br>
-                    No weekly study data available for this student.
-                `;
+    inferSessionCategory(slot, subject) {
+  // 1) Try explicit activity/type fields FIRST (most accurate)
+  const primaryText = [
+    slot?.jenis,
+    slot?.jenis_kelas,
+    slot?.kod_aktiviti,
+    slot?.nama_aktiviti,
+    slot?.kod_kelas
+  ].filter(Boolean).join(' ').toLowerCase();
 
-                canvas.parentElement.appendChild(msg);
-        }
-    return; // ⛔ stop rendering chart
+  const byPrimary = this.getSessionCategory(primaryText);
+  if (byPrimary !== 'other') return byPrimary;
+
+  // 2) Try section pattern SECOND (if your data uses this)
+  // Examples: L01, T02, A03
+  const section = String(subject?.seksyen || slot?.seksyen || '').toUpperCase();
+  if (section.startsWith('L')) return 'lecture';
+  if (section.startsWith('T')) return 'tutorial';
+  if (section.startsWith('A') || section.startsWith('M')) return 'lab';
+
+  // 3) Room name is NOT reliable for lecture vs lab, so only tag lab
+  // when the room name very explicitly says lab/amali.
+  const roomText = [
+    slot?.ruang?.nama_ruang,
+    slot?.ruang?.nama_ruang_singkatan,
+    slot?.ruang?.kod_ruang
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (roomText.includes('amali') || roomText.includes('lab')) return 'lab';
+
+  // 4) Default: lecture (better than dumping into "other")
+  return 'lecture';
 }
 
 
-        // ❗ Lecturer with NO REAL DATA (fake login or no classes)
-        if (user.role === 'lecturer' && !hasWeeklyActivity) {
-            const canvas = document.getElementById('weeklyChart');
-            if (canvas && canvas.parentElement) {
-                canvas.style.display = 'none';
+    // ===============================
+    // TIME BLOCK HELPER (REAL TTMS)
+    // ===============================
+    getTimeBlock(masa, jam) {
+        let hour = null;
 
-                // remove old message if any
-                const oldMsg = canvas.parentElement.querySelector('.no-weekly-msg');
-                if (oldMsg) oldMsg.remove();
-
-                const msg = document.createElement('div');
-                msg.className = 'no-weekly-msg text-center py-4 text-muted';
-                msg.innerHTML = `
-                    <i class="fas fa-info-circle fa-2x mb-2"></i><br>
-                    No weekly teaching data available for this lecturer.
-                `;
-
-            canvas.parentElement.appendChild(msg);
+        // Prefer jam if exists
+        if (jam) {
+            hour = parseInt(jam.split(':')[0]);
         }
-        return; // ⛔ stop rendering chart
+        // Fallback to TTMS slot
+        else if (masa) {
+            const slotToHour = {
+                1: 7, 2: 8, 3: 9, 4: 10, 5: 11,
+                6: 12, 7: 13, 8: 14, 9: 15, 10: 16
+            };
+            hour = slotToHour[masa];
     }
 
+        if (hour >= 8 && hour <= 11) return 'morning';
+        if (hour >= 12 && hour <= 16) return 'afternoon';
+        return null;
+    }
+
+    // Daily Distribution (REAL TTMS, HOURS by class type)
+    async getDailyDistribution(user, dayNumber) {
+    const result = { lecture: 0, tutorial: 0, lab: 0, other: 0 };
+    const { sesi, semester } = TTMS.getCurrentSession();
+
+    let subjects = [];
+
+    // ✅ Use supported TTMS entities only
+    if (user.role === 'student') {
+        subjects = await TTMS.fetchMyCourses(user.username); // pelajar_subjek ✅
+    } else if (user.role === 'lecturer') {
+        subjects = await TTMS.fetchLecturerSubjects(user.username); // pensyarah_subjek ✅
+    } else {
+        return result;
+    }
+
+    const currentSubjects = subjects.filter(s =>
+        s.sesi === sesi && String(s.semester) === String(semester)
+    );
+
+    for (const subject of currentSubjects) {
+        if (!subject.kod_subjek || !subject.seksyen) continue;
+
+        const timetable = await TTMS.fetchCourseSchedule(
+            subject.kod_subjek,
+            sesi,
+            semester,
+            subject.seksyen
+        ); // jadual_subjek ✅
+
+        if (!Array.isArray(timetable)) continue;
+
+        timetable.forEach(slot => {
+            if (Number(slot.hari) !== dayNumber) return;
+
+            // ✅ Use stronger inference (room name etc.)
+            const type = this.inferSessionCategory(slot, subject);
+
+            result[type] = (result[type] || 0) + 1;
+        });
+    }
+
+    return result;
+}
 
 
-        const canvas = document.getElementById('weeklyChart');
-        if (!canvas) {
-            console.error('weeklyChart canvas not found');
-            return;
+    // DRAW DAILY DISTRIBUTION CHART
+
+async drawDailyDistributionChart() {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user) {
+        console.warn('User not found in localStorage');
+        return;
+    }
+
+    const canvas = document.getElementById('dailyDistributionChart');
+    if (!canvas) {
+        console.warn('dailyDistributionChart canvas not found');
+        return;
+    }
+
+    if (typeof Chart === 'undefined') {
+        console.error('❌ Chart.js is not available');
+        canvas.parentElement.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Chart.js library is not loaded. Please refresh the page.
+            </div>
+        `;
+        return;
+    }
+
+    if (this.isDrawingDaily) {
+        console.warn('⏳ Daily distribution chart already drawing, skipping...');
+        return;
+    }
+    this.isDrawingDaily = true;
+
+    try {
+        // Destroy old chart
+        if (this.charts.daily) {
+            this.charts.daily.destroy();
+            this.charts.daily = null;
         }
 
-        canvas.style.display = 'block';
-        
-        const oldMsg = canvas.parentElement.querySelector('.no-weekly-msg');
-        if (oldMsg) oldMsg.remove();
+        // TTMS weekday mapping
+        const days = [
+            { num: 2, label: 'Monday' },
+            { num: 3, label: 'Tuesday' },
+            { num: 4, label: 'Wednesday' },
+            { num: 5, label: 'Thursday' },
+            { num: 6, label: 'Friday' }
+        ];
+
+        const labels = [];
+        const lecture = [];
+        const tutorial = [];
+        const lab = [];
+        const other = [];
+
+        // ===============================
+        // 🔥 FIX: FETCH TTMS DATA ONCE
+        // ===============================
+        const { sesi, semester } = TTMS.getCurrentSession();
+
+        const subjects = user.role === 'student'
+            ? await TTMS.fetchMyCourses(user.username)
+            : await TTMS.fetchLecturerSubjects(user.username);
+
+        const currentSubjects = subjects.filter(s =>
+            s.sesi === sesi && String(s.semester) === String(semester)
+        );
+
+        // Daily accumulator
+        const dailyMap = {
+            2: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
+            3: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
+            4: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
+            5: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} },
+            6: { lecture: 0, tutorial: 0, lab: 0, other: 0, classes: {} }
+        };
 
 
-        if (this.charts.weekly) {
-            this.charts.weekly.destroy();
+        // ===============================
+        // 🔥 AGGREGATE LOCALLY (NO RACES)
+        // ===============================
+        for (const subject of currentSubjects) {
+            if (!subject.kod_subjek || !subject.seksyen) continue;
+
+            const timetable = await TTMS.fetchCourseSchedule(
+                subject.kod_subjek,
+                sesi,
+                semester,
+                subject.seksyen
+            );
+
+            if (!Array.isArray(timetable)) continue;
+
+            timetable.forEach(slot => {
+                const day = Number(slot.hari);
+                if (!dailyMap[day]) return;
+
+                const type = this.inferSessionCategory(slot, subject);
+
+                // total sessions (hours)
+                dailyMap[day][type]++;
+
+                // per-class hours
+                const classKey = `${subject.kod_subjek} (${subject.seksyen})`;
+
+                if (!dailyMap[day].classes[classKey]) {
+                    dailyMap[day].classes[classKey] = 0;
+                }
+                dailyMap[day].classes[classKey]++;
+            });
+
         }
 
-        const labels = Object.keys(weekly);
-        const morning = labels.map(d => weekly[d].morning);
-        const afternoon = labels.map(d => weekly[d].afternoon);
-        const evening = labels.map(d => weekly[d].evening);
+        // Push data into arrays
+        for (const day of days) {
+            labels.push(day.label);
+            lecture.push(dailyMap[day.num].lecture);
+            tutorial.push(dailyMap[day.num].tutorial);
+            lab.push(dailyMap[day.num].lab);
+            other.push(dailyMap[day.num].other);
+        }
 
-        this.charts.weekly = new Chart(canvas, {
+        // ===============================
+        // AUTOMATED INSIGHTS (UNCHANGED)
+        // ===============================
+        const totalsByDay = labels.map((_, i) =>
+            lecture[i] + tutorial[i] + lab[i] + other[i]
+        );
+
+        const busiestIndex = totalsByDay.indexOf(Math.max(...totalsByDay));
+
+        const nonZeroTotals = totalsByDay
+            .map((v, i) => ({ v, i }))
+            .filter(o => o.v > 0);
+
+        const lightestIndex = nonZeroTotals.length
+            ? nonZeroTotals.reduce((a, b) => (b.v < a.v ? b : a)).i
+            : -1;
+
+        const freeEl = document.getElementById('insight-free');
+        const freeDays = labels
+            .map((day, i) => ({ day, total: totalsByDay[i] }))
+            .filter(x => x.total === 0)
+            .map(x => x.day);
+
+        if (freeEl) {
+            freeEl.textContent = freeDays.length
+                ? `No-class day(s): ${freeDays.join(', ')}`
+                : 'No-class day(s): —';
+        }
+
+        const totalsByType = {
+            Lecture: lecture.reduce((a, b) => a + b, 0),
+            Tutorial: tutorial.reduce((a, b) => a + b, 0),
+            Lab: lab.reduce((a, b) => a + b, 0),
+            Others: other.reduce((a, b) => a + b, 0)
+        };
+
+        const dominantType = Object.entries(totalsByType)
+            .reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+
+        const busiestEl = document.getElementById('insight-busiest');
+        const lightestEl = document.getElementById('insight-lightest');
+        const dominantEl = document.getElementById('insight-dominant');
+
+        if (busiestEl) {
+            busiestEl.innerHTML = `<i class="fas fa-circle text-danger me-2"></i>
+                Busiest Day: ${labels[busiestIndex]} (highest total sessions)`;
+        }
+
+        if (lightestEl) {
+            lightestEl.innerHTML = lightestIndex >= 0
+                ? `<i class="fas fa-circle text-success me-2"></i>
+                   Lightest Day: ${labels[lightestIndex]} (lowest total sessions)`
+                : `<i class="fas fa-circle text-success me-2"></i>
+                   Lightest Day: —`;
+        }
+
+        if (dominantEl) {
+            dominantEl.textContent =
+                `Primary Workload Type: ${dominantType} (largest weekly contribution)`;
+        }
+
+        // ===============================
+        // RENDER CHART
+        // ===============================
+        this.charts.daily = new Chart(canvas, {
             type: 'bar',
             data: {
                 labels,
                 datasets: [
-                    { label: 'Morning', data: morning, backgroundColor: '#FF9800' },
-                    { label: 'Afternoon', data: afternoon, backgroundColor: '#4CAF50' },
-                    { label: 'Evening', data: evening, backgroundColor: '#2196F3' }
+                    { label: 'Lecture', data: lecture, backgroundColor: '#1976D2' },
+                    { label: 'Tutorial', data: tutorial, backgroundColor: '#4CAF50' },
+                    { label: 'Lab', data: lab, backgroundColor: '#FF9800' },
+                    { label: 'Others', data: other, backgroundColor: '#9C27B0' }
                 ]
             },
             options: {
-                responsive: false,
+                responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     x: { stacked: true },
-                    y: { stacked: true, beginAtZero: true }
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        max: 8,
+                        title: { display: true, text: 'Hours per Day' }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: user.role === 'student'
+                            ? 'My Daily Class Workload Distribution (Sessions)'
+                            : 'My Daily Teaching Workload Distribution (Sessions)'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => {
+                                const dayIndex = ctx.dataIndex;
+                                const dayNum = days[dayIndex].num;
+
+                                const sessionCount = ctx.raw;
+                                const classesObj = dailyMap[dayNum].classes;
+                                const classCount = Object.keys(classesObj).length;
+
+                                const classLines = Object.entries(classesObj)
+                                    .map(([name, hrs]) => `• ${name}: ${hrs} hr(s)`);
+
+                                return [
+                                    `${ctx.dataset.label}: ${sessionCount} hr(s)`,
+                                    `Classes: ${classCount}`,
+                                    ...classLines
+                                ];
+                            }
+                        }
+                    }
                 }
             }
         });
 
-        console.log('AnalysisController: Weekly Chart.js rendered');
+        console.log('✅ Daily distribution chart rendered (FIXED, STABLE)');
 
     } catch (err) {
-        console.error('Error rendering Chart.js weekly chart', err);
+        console.error('❌ Daily distribution chart error:', err);
+    } finally {
+        this.isDrawingDaily = false;
     }
 }
+    async getPeakHoursFromMyTimetable(user) {
+    const { sesi, semester } = TTMS.getCurrentSession();
+
+    const subjects = user.role === 'student'
+        ? await TTMS.fetchMyCourses(user.username)
+        : await TTMS.fetchLecturerSubjects(user.username);
+
+    const currentSubjects = subjects.filter(s =>
+        s.sesi === sesi && String(s.semester) === String(semester)
+    );
+
+    const hourMap = {}; // { '8': count, '9': count, ... }
+
+    for (const subject of currentSubjects) {
+        if (!subject.kod_subjek || !subject.seksyen) continue;
+
+        const timetable = await TTMS.fetchCourseSchedule(
+            subject.kod_subjek,
+            sesi,
+            semester,
+            subject.seksyen
+        );
+
+        if (!Array.isArray(timetable)) continue;
+
+        timetable.forEach(slot => {
+            let hour = null;
+
+// Prefer real time if exists
+if (slot.jam) {
+    hour = parseInt(slot.jam.split(':')[0]);
+}
+// Otherwise derive from TTMS masa slot
+else if (slot.masa) {
+    const slotToHour = {
+        1: 7,
+        2: 8,   // ✅ THIS is why 8 AM returns
+        3: 9,
+        4: 10,
+        5: 11,
+        6: 12,
+        7: 13,
+        8: 14,
+        9: 15,
+        10: 16
+    };
+
+    hour = slotToHour[slot.masa];
+}
+
+if (!hour) return;
+
+hourMap[hour] = (hourMap[hour] || 0) + 1;
+
+        });
+    }
+
+    return Object.entries(hourMap)
+        .map(([hour, count]) => ({ hour: `${hour}:00`, count }))
+        .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+}
+
     
-    // Load peak hours chart
+    // Load peak hours chart (FROM MY TIMETABLE)
 async loadPeakHoursChart() {
     try {
-        console.log('📊 Loading Peak Hours chart (role-based)');
+        console.log('📊 Loading Peak Hours chart (from My Timetable)');
 
         const user = JSON.parse(localStorage.getItem('user'));
         if (!user) return;
 
         const titleEl = document.getElementById('peakHoursTitle');
         const container = document.getElementById('peakHoursChart');
-
         if (!container) return;
 
-        container.innerHTML = ''; // clear old chart/messages
+        container.innerHTML = '';
 
-        let peakData = [];
-        let chartTitle = '';
-
-        // ================= STUDENT =================
-        if (user.role === 'student') {
-            if (titleEl) {
-                titleEl.innerHTML = `
-                    <i class="fas fa-fire text-warning me-2"></i>
-                    Peak Studying Hours
-                `;
-            }
-
-            peakData = await TTMS.fetchPeakStudyHoursForStudent(user);
-
-            // ❌ NO DATA (fake student)
-            if (!Array.isArray(peakData) || peakData.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-4 text-muted">
-                        <i class="fas fa-info-circle fa-2x mb-2"></i><br>
-                        No study information available for this student.
-                    </div>
-                `;
-                return;
-            }
-
-            chartTitle = 'Peak Studying Hours (Student)';
+        if (titleEl) {
+            titleEl.innerHTML = `
+                <i class="fas fa-fire text-warning me-2"></i>
+                ${user.role === 'student'
+                    ? 'Busiest Study Hours (My Timetable)'
+                    : 'Busiest Teaching Hours (My Timetable)'}
+            `;
         }
 
-        // ================= LECTURER =================
-        else if (user.role === 'lecturer') {
-            if (titleEl) {
-                titleEl.innerHTML = `
-                    <i class="fas fa-fire text-warning me-2"></i>
-                    Peak Teaching Hours
-                `;
-            }
+        // ✅ CORRECT DATA SOURCE
+        const peakData = await this.getPeakHoursFromMyTimetable(user);
 
-            const result = await TTMS.fetchPeakTeachingHoursForLecturer(user);
-
-            // ❌ NO DATA (fake lecturer)
-            if (!result || result.status !== 'OK' || !result.hours.length) {
-                container.innerHTML = `
-                    <div class="text-center py-4 text-muted">
-                        <i class="fas fa-info-circle fa-2x mb-2"></i><br>
-                        ${result?.message || 'No teaching information available for this lecturer.'}
-                    </div>
-                `;
-                return;
-            }
-
-            peakData = result.hours;
-            chartTitle = 'Peak Teaching Hours (Lecturer)';
+        if (!Array.isArray(peakData) || peakData.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-info-circle fa-2x mb-2"></i><br>
+                    No timetable data available.
+                </div>
+            `;
+            return;
         }
-
-        else return;
-
-        // ================= CHART LOGIC =================
 
         const maxCount = Math.max(...peakData.map(p => p.count));
         const peakSlots = peakData.filter(p => p.count === maxCount);
+        const totalSlots = peakData.reduce((sum, p) => sum + p.count, 0);
 
         google.charts.setOnLoadCallback(() => {
             const data = new google.visualization.DataTable();
-            data.addColumn('string', 'Time');
-            data.addColumn('number', 'Count');
+            data.addColumn('string', 'Hour of Day');
+            data.addColumn('number', 'Occupied Slots');
+            data.addColumn({ role: 'tooltip', type: 'string', p: { html: true } });
+            data.addColumn({ role: 'style' });
+            data.addColumn({ role: 'annotation' });
 
             peakData.forEach(item => {
-                data.addRow([item.hour, item.count]);
+                const isPeak = item.count === maxCount;
+                const percentage = ((item.count / totalSlots) * 100).toFixed(1);
+
+                const tooltip = `
+                    <div style="padding:8px 10px;">
+                        <strong>Hour:</strong> ${item.hour}<br>
+                        <strong>Occupied slots:</strong> ${item.count}<br>
+                        <strong>Weekly share:</strong> ${percentage}%<br>
+                        <strong>Intensity:</strong> ${isPeak ? 'Peak' : 'Normal'}
+                    </div>
+                `;
+
+                data.addRow([
+                    item.hour,
+                    item.count,
+                    tooltip,
+                    isPeak
+                        ? 'color: #D32F2F; font-weight: bold;'
+                        : 'color: #E0E0E0;',
+                    isPeak ? 'Peak' : null
+                ]);
             });
 
             const options = {
-                title: chartTitle,
                 backgroundColor: 'transparent',
                 width: '100%',
-                height: 380,
-
+                height: 320,
+                tooltip: { isHtml: true },
                 chartArea: {
                     left: 60,
                     right: 30,
-                    top: 60,
+                    top: 50,
                     bottom: 60,
                     width: '100%',
-                    height: '75%'
+                    height: '65%'
                 },
-
                 hAxis: {
-                    title: 'Time',
+                    title: 'Hour of Day',
                     textStyle: { fontSize: 12 }
                 },
-
                 vAxis: {
-                    title: 'Number of Sessions',
+                    title: 'Number of Occupied Slots per Week',
                     minValue: 0,
+                    maxValue: 4,
+                    format: '0',
                     textStyle: { fontSize: 12 }
                 },
-
-                legend: { position: 'none' },
-                colors: [user.role === 'student' ? '#1976D2' : '#D32F2F']
+                legend: { position: 'none' }
             };
 
-            // 🔔 Peak info text
+            // 🔔 Info text
             let infoBox = document.getElementById('peakHoursInfo');
             if (!infoBox) {
                 infoBox = document.createElement('div');
@@ -313,12 +634,43 @@ async loadPeakHoursChart() {
                 infoBox.style.textAlign = 'center';
                 infoBox.style.marginBottom = '10px';
                 infoBox.style.fontWeight = '600';
-                infoBox.style.color = '#444';
                 container.parentElement.insertBefore(infoBox, container);
             }
 
             infoBox.innerText =
-                `Peak hours: ${peakSlots.map(p => p.hour).join(', ')} (${maxCount} sessions per week)`;
+                `Busiest hour(s): ${peakSlots.map(p => p.hour).join(', ')} (${maxCount} occupied slots/week)`;
+
+            let explanationEl = document.getElementById('peakHoursExplanation');
+            if (!explanationEl) {
+                explanationEl = document.createElement('div');
+                explanationEl.id = 'peakHoursExplanation';
+                explanationEl.style.textAlign = 'center';
+                explanationEl.style.fontSize = '13px';
+                explanationEl.style.color = '#444';
+                explanationEl.style.marginTop = '6px';
+                container.parentElement.after(explanationEl);
+            }
+
+            explanationEl.innerText =
+                'This chart shows how often you are scheduled at each hour across your weekly timetable.';
+
+            let insightEl = document.getElementById('peakHoursInsight');
+            if (!insightEl) {
+                insightEl = document.createElement('div');
+                insightEl.id = 'peakHoursInsight';
+                insightEl.style.textAlign = 'center';
+                insightEl.style.marginTop = '6px';
+                insightEl.style.fontSize = '13px';
+                insightEl.style.color = '#666';
+                container.parentElement.after(insightEl);
+            }
+
+            const peakShare = ((maxCount / totalSlots) * 100).toFixed(1);
+
+            insightEl.innerText =
+                user.role === 'student'
+                    ? `Around ${peakShare}% of your weekly classes occur during peak hours.`
+                    : `Around ${peakShare}% of your weekly teaching load occurs during peak hours.`;
 
             const chart = new google.visualization.ColumnChart(container);
             chart.draw(data, options);
@@ -329,6 +681,7 @@ async loadPeakHoursChart() {
         console.error('Error loading peak hours chart:', error);
     }
 }
+
 
     
     // Refresh all charts

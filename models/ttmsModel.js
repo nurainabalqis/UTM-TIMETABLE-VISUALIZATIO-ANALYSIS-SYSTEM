@@ -472,6 +472,22 @@ const TTMS = {
         }
     },
 
+    // ✅ Lecturer full timetable (best source for jenis + hari)
+    async fetchLecturerTimetableSlots(lecturerId, sesi = null, semester = null) {
+    try {
+        const currentSession = this.getCurrentSession();
+        const timetable = await this.fetchWithAdminSession('jadual_pensyarah', {
+            no_pekerja: lecturerId,
+            sesi: sesi || currentSession.sesi,
+            semester: semester || currentSession.semester
+        });
+        return Array.isArray(timetable) ? timetable : [];
+        } catch (e) {
+            console.error('❌ Error fetching lecturer timetable slots:', e);
+            return [];
+        }
+    },
+
     // ============ STUDENTS FETCHING ============
 
     async fetchStudents(sesi = null, semester = null) {
@@ -645,6 +661,22 @@ const TTMS = {
         } catch (error) {
             console.error('❌ Error fetching total students:', error);
             return 0;
+        }
+    },
+
+    // ✅ Student full timetable (best source for jenis + hari)
+    async fetchStudentTimetable(studentId, sesi = null, semester = null) {
+    try {
+        const currentSession = this.getCurrentSession();
+        const timetable = await this.fetchWithAdminSession('jadual_pelajar', {
+            no_matrik: studentId,
+            sesi: sesi || currentSession.sesi,
+            semester: semester || currentSession.semester
+        });
+        return Array.isArray(timetable) ? timetable : [];
+        } catch (e) {
+            console.error('❌ Error fetching student timetable:', e);
+        return [];
         }
     },
 
@@ -1194,32 +1226,6 @@ getDayNameFromHari(dayNumber) {
     return dayMap[dayNum] || null;
 },
 
-// Convert masa/jam to time block (morning, afternoon, evening)
-getTimeBlockFromMasaJam(masa, jam) {
-    let hour = 0;
-    
-    // Try jam first
-    if (jam) {
-        hour = parseInt(jam.split(':')[0]);
-    } 
-    // Then masa
-    else if (masa) {
-        const slot = parseInt(masa);
-        const slotToHour = {
-            1: 7, 2: 8, 3: 9, 4: 10, 5: 11, 
-            6: 12, 7: 13, 8: 14, 9: 15, 10: 16
-        };
-        hour = slotToHour[slot] || 0;
-    }
-    
-    // Determine time block
-    if (hour >= 8 && hour <= 11) return 'morning';
-    if (hour >= 12 && hour <= 14) return 'afternoon';
-    if (hour >= 15 && hour <= 18) return 'evening';
-    
-    return null;
-},
-
 // Parse TTMS response
 parseTTMSResponse(text, entity) {
     try {
@@ -1252,142 +1258,82 @@ parseTTMSResponse(text, entity) {
 
     async fetchWeeklyDistributionForUser(user) {
     try {
-        console.log('📊 REAL Weekly Distribution (TTMS only)');
+        console.log('📊 REAL Weekly Distribution by Workload Type (TTMS)');
 
         const { sesi, semester } = this.getCurrentSession();
 
-        // Final structure (Monday–Friday only)
+        // ✅ Final structure (matches Daily Distribution)
         const weekly = {
-            Monday:    { morning: 0, afternoon: 0, evening: 0 },
-            Tuesday:   { morning: 0, afternoon: 0, evening: 0 },
-            Wednesday: { morning: 0, afternoon: 0, evening: 0 },
-            Thursday:  { morning: 0, afternoon: 0, evening: 0 },
-            Friday:    { morning: 0, afternoon: 0, evening: 0 }
+            Monday:    { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Tuesday:   { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Wednesday: { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Thursday:  { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Friday:    { lecture: 0, tutorial: 0, lab: 0, other: 0 }
         };
 
-        let relevantSubjects = [];
+        let subjects = [];
 
-        /* =======================
-           1️⃣ GET USER SUBJECTS
-           ======================= */
-
+        // 1️⃣ Get subjects by role (NO ADMIN LOGIC CHANGE)
         if (user.role === 'student') {
-            // Student → pelajar_subjek
-            relevantSubjects = await this.fetchWithAdminSession('pelajar_subjek', {
-                no_matrik: user.username,
-                sesi,
-                semester
-            });
-
+            subjects = await this.fetchMyCourses(user.username);
         } else if (user.role === 'lecturer') {
-            // Lecturer → pensyarah_subjek
-            relevantSubjects = await this.fetchWithAdminSession('pensyarah_subjek', {
-                no_pekerja: user.username,
-                sesi,
-                semester
-            });
-
+            subjects = await this.fetchLecturerSubjects(user.username);
         } else {
-            console.warn('⚠️ Weekly distribution: unsupported role');
             return weekly;
         }
 
-        if (!Array.isArray(relevantSubjects) || relevantSubjects.length === 0) {
-            console.warn('⚠️ No subjects found → empty weekly distribution');
-            return weekly;
-        }
+        // 2️⃣ Filter current session
+        const currentSubjects = subjects.filter(s =>
+            s.sesi === sesi &&
+            String(s.semester) === String(semester)
+        );
 
-        /* ==========================
-           2️⃣ FETCH ALL TIMETABLES
-           ========================== */
-
-        for (const subject of relevantSubjects) {
+        // 3️⃣ Loop subjects → timetable
+        for (const subject of currentSubjects) {
             if (!subject.kod_subjek || !subject.seksyen) continue;
 
-            const timetable = await this.fetchWithAdminSession('jadual_subjek', {
-                kod_subjek: subject.kod_subjek,
-                seksyen: subject.seksyen,
+            const timetable = await this.fetchCourseSchedule(
+                subject.kod_subjek,
                 sesi,
-                semester
-            });
+                semester,
+                subject.seksyen
+            );
 
             if (!Array.isArray(timetable)) continue;
 
-            /* ==========================
-               3️⃣ PROCESS TIME SLOTS
-               ========================== */
-
             timetable.forEach(slot => {
                 const day = this.getDayNameFromHari(slot.hari);
-                const block = this.getTimeBlockFromMasaJam(slot.masa, slot.jam);
+                if (!weekly[day]) return;
 
-                if (!weekly[day] || !block) return;
+                // ✅ SAME classification as AnalysisController
+                const jenis = slot.jenis || subject.jenis || subject.jenis_kelas || '';
+                const j = jenis.toLowerCase();
 
-                weekly[day][block]++;
+                let type = 'other';
+                if (j.includes('kuliah') || j.includes('lecture')) type = 'lecture';
+                else if (j.includes('tutorial') || j.includes('tutor')) type = 'tutorial';
+                else if (j.includes('amal') || j.includes('lab')) type = 'lab';
+
+                weekly[day][type] += 1; // 1 session ≈ 1 hour
             });
         }
 
-        console.log('✅ Weekly distribution computed:', weekly);
+        console.log('✅ Weekly workload distribution:', weekly);
         return weekly;
 
     } catch (error) {
         console.error('❌ Weekly distribution error:', error);
 
-        // SAFE fallback → zeros only (never fake data)
+        // SAFE fallback (never fake data)
         return {
-            Monday:    { morning: 0, afternoon: 0, evening: 0 },
-            Tuesday:   { morning: 0, afternoon: 0, evening: 0 },
-            Wednesday: { morning: 0, afternoon: 0, evening: 0 },
-            Thursday:  { morning: 0, afternoon: 0, evening: 0 },
-            Friday:    { morning: 0, afternoon: 0, evening: 0 }
+            Monday:    { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Tuesday:   { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Wednesday: { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Thursday:  { lecture: 0, tutorial: 0, lab: 0, other: 0 },
+            Friday:    { lecture: 0, tutorial: 0, lab: 0, other: 0 }
         };
     }
 },
-
-
-    async fetchPeakHoursData() {
-        try {
-            const courses = await this.fetchCourses();
-            if (courses.length === 0) return [];
-
-            const timeSlots = [
-                '8 AM', '9 AM', '10 AM', '11 AM',
-                '12 PM', '1 PM', '2 PM', '3 PM',
-                '4 PM', '5 PM', '6 PM', '7 PM',
-                '8 PM', '9 PM', '10 PM'
-            ];
-
-            // Distribute courses across time slots
-            const slotCounts = {};
-            timeSlots.forEach(slot => slotCounts[slot] = 0);
-
-            courses.forEach((course, index) => {
-                const slotIndex = index % timeSlots.length;
-                const slot = timeSlots[slotIndex];
-                slotCounts[slot] += 1;
-            });
-
-            return Object.entries(slotCounts)
-                .map(([slot, count]) => ({ slot, count }))
-                .sort((a, b) => {
-                    // Sort by time
-                    const getHour = (slot) => {
-                        const time = parseInt(slot);
-                        if (slot.includes('AM')) return time;
-                        if (slot.includes('PM') && time !== 12) return time + 12;
-                        return time;
-                    };
-                    return getHour(a.slot) - getHour(b.slot);
-                });
-            
-        } catch (error) {
-            console.error('Error fetching peak hours:', error);
-            return [];
-        }
-    },
-
-
-
     // ============ CLASH DETECTION ============
     
     async detectStudentClashes(studentId) {
