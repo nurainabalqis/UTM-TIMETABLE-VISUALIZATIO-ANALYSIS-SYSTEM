@@ -126,6 +126,54 @@ const DashboardController = {
             console.error('ERROR initializing charts:', error);
         }
     },
+<<<<<<< Updated upstream
+=======
+
+    async getTimetableDataFromCourses(user) {
+        try {
+            console.log('📅 Trying alternative timetable data source...');
+            
+            const currentSession = TTMS.getCurrentSession();
+            let courses = [];
+            
+            if (user.role === 'student') {
+                courses = await TTMS.fetchMyCourses(user.username);
+            } else if (user.role === 'lecturer') {
+                // For lecturers, get courses they teach
+                const allCourses = await TTMS.fetchCourses();
+                courses = allCourses.filter(c => 
+                    c.kod_pensyarah === user.username || 
+                    c.no_pekerja === user.username
+                );
+            }
+            
+            // Filter for current session
+            const currentCourses = courses.filter(c => 
+                c.sesi === currentSession.sesi && 
+                c.semester.toString() === currentSession.semester
+            );
+            
+            // Convert to timetable format
+            const timetableData = currentCourses.map(course => ({
+                courseCode: course.kod_subjek,
+                courseName: course.nama_subjek,
+                schedule: [{
+                    hari: course.hari,
+                    masa: course.masa,
+                    kod_bilik: course.kod_bilik,
+                    ruang: course.kod_bilik ? { kod_ruang: course.kod_bilik } : null
+                }]
+            }));
+            
+            console.log(` Alternative timetable data: ${timetableData.length} courses`);
+            return timetableData;
+            
+        } catch (error) {
+            console.error('  Error in alternative timetable:', error);
+            return [];
+        }
+    },
+>>>>>>> Stashed changes
     
     // Draw workload chart with REAL data
     async drawWorkloadChart() {
