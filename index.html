@@ -614,6 +614,16 @@ this.stats.totalStudents = matricSet.size;
                 async loadMyCourses() {
                     const response = await fetch('views/mycourses.html');
                     const template = await response.text();
+
+                    const FACULTY_MAP = {
+                        FSKSM: ['SCSE', 'SEC', 'MCS', 'MEC', 'SECJ', 'SECV', 'SECR', 'SECP'], // include your common SEC* too
+                        FKE: ['ELE', 'EEE'],
+                        FKM: ['MEC'],
+                        FAB: ['UHB', 'UHL'],
+                        FPPSM: ['UHLB'],
+                        FKKKSA: ['CHE'],
+                        PPIPS: ['SSH']
+                    };
                     
                     this.components.mycourses = {
                         template,
@@ -622,7 +632,7 @@ this.stats.totalStudents = matricSet.size;
                                 courses: [],
                                 filteredCourses: [],
                                 filterSession: 'current',
-                                filterStatus: 'all',
+                                searchTerm: '',
                                 isLoading: true
                             };
                         },
@@ -632,58 +642,120 @@ this.stats.totalStudents = matricSet.size;
                         methods: {
                             async loadStudentCourses() {
                                 this.isLoading = true;
+
                                 try {
-                                    const user = JSON.parse(localStorage.getItem('user'));
+                                    const user = JSON.parse(localStorage.getItem("user"));
                                     const allCourses = await TTMS.fetchMyCourses(user.username);
-                                    
-                                    const currentSession = JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
-                                    this.courses = allCourses.map(course => ({
+
+                                    const currentSession =
+                                    JSON.parse(localStorage.getItem("currentSession")) || {
+                                        sesi: "2025/2026",
+                                        semester: "1"
+                                    };
+
+                                    const norm = (v) => String(v ?? "").trim().toUpperCase();
+                                    const keyOf = (code, sec) => `${norm(code)}-${String(sec ?? "").trim()}`;
+
+                                    // 1) collect unique subject codes from registered courses
+                                    const uniqueCodes = Array.from(
+                                    new Set((allCourses || []).map(c => norm(c.kod_subjek)).filter(Boolean))
+                                    );
+
+                                    // 2) fetch lecturer lists per subject (subjek_pensyarah) and build map (kod_subjek+seksyen -> nama)
+                                    const lecturerByCourseSection = {};
+
+                                    await Promise.all(
+                                    uniqueCodes.map(async (code) => {
+                                        try {
+                                        const list = await TTMS.fetchWithAdminSession("subjek_pensyarah", {
+                                            kod_subjek: code,
+                                            sesi: currentSession.sesi,
+                                            semester: currentSession.semester
+                                        });
+
+                                        if (!Array.isArray(list)) return;
+
+                                            list.forEach((row) => {
+                                                if (!row || !row.seksyen || !row.nama) return;
+
+                                                const sec = String(row.seksyen).trim();
+                                                const name = String(row.nama).trim();
+                                                if (!sec || !name || name === "-") return;
+
+                                                lecturerByCourseSection[keyOf(code, sec)] = name;
+                                            });
+                                        } catch (e) {
+                                            console.warn("subjek_pensyarah failed for", code, e);
+                                        }
+                                    })
+                                    );
+
+                                    // 3) attach lecturer name into each registered course row
+                                    this.courses = (allCourses || []).map((course) => {
+                                    const code = norm(course.kod_subjek);
+                                    const sec = String(course.seksyen ?? "").trim();
+
+                                    return {
                                         ...course,
-                                        isCurrent: course.sesi === currentSession.sesi && 
-                                                  course.semester.toString() === currentSession.semester
-                                    }));
-                                    
+                                        nama_pensyarah: lecturerByCourseSection[keyOf(code, sec)] ?? null,
+                                        isCurrent:
+                                        course.sesi === currentSession.sesi &&
+                                        String(course.semester) === String(currentSession.semester)
+                                    };
+                                    });
+
                                     this.applyFilters();
-                                    
                                 } catch (error) {
-                                    console.error('Error loading student courses:', error);
-                                    this.$parent.showAlert('Failed to load courses: ' + error.message, 'danger');
+                                    console.error("Error loading student courses:", error);
+                                    this.$parent.showAlert("Failed to load courses: " + error.message, "danger");
                                 } finally {
                                     this.isLoading = false;
                                 }
                             },
                             
                             applyFilters() {
-                                const currentSession = JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
-                                
+                                const currentSession =
+                                    JSON.parse(localStorage.getItem('currentSession')) || { sesi: '2025/2026', semester: '1' };
+
+                                const term = (this.searchTerm || '').toLowerCase().trim();
+
                                 this.filteredCourses = this.courses.filter(course => {
-                                    let sessionMatch = true;
-                                    let statusMatch = true;
-                                    
                                     // Session filter
+                                    let sessionMatch = true;
+
                                     if (this.filterSession === 'current') {
-                                        sessionMatch = course.sesi === currentSession.sesi && 
-                                                      course.semester.toString() === currentSession.semester;
+                                    sessionMatch =
+                                        course.sesi === currentSession.sesi &&
+                                        course.semester.toString() === currentSession.semester;
                                     } else if (this.filterSession !== 'all') {
-                                        const [sesi, semester] = this.filterSession.split('-');
-                                        sessionMatch = course.sesi === sesi && 
-                                                      course.semester.toString() === semester;
+                                    const [sesi, semester] = this.filterSession.split('-');
+                                    sessionMatch = course.sesi === sesi && course.semester.toString() === semester;
                                     }
-                                    
-                                    // Status filter
-                                    if (this.filterStatus !== 'all') {
-                                        statusMatch = course.status === this.filterStatus;
+
+                                    // Search filter
+                                    let searchMatch = true;
+                                    if (term) {
+                                    const code = String(course.kod_subjek || '').toLowerCase();
+                                    const name = String(course.nama_subjek || '').toLowerCase();
+                                    const lecturer = String(course.lecturer || course.nama_pensyarah || '').toLowerCase();
+                                    const section = String(course.seksyen || '').toLowerCase();
+
+                                    searchMatch =
+                                        code.includes(term) ||
+                                        name.includes(term) ||
+                                        lecturer.includes(term) ||
+                                        section.includes(term);
                                     }
-                                    
-                                    return sessionMatch && statusMatch;
+
+                                    return sessionMatch && searchMatch;
                                 });
                             },
                             
                             exportCourses() {
                                 const csvContent = "data:text/csv;charset=utf-8," 
-                                    + "Course Code,Course Name,Section,Session,Year,Status\n"
+                                    + "Course Code,Course Name,Section,Session,Credit,Year,Status\n"
                                     + this.filteredCourses.map(c => 
-                                        `${c.kod_subjek},${c.nama_subjek},${c.seksyen},${c.sesi}-${c.semester},${c.tahun_kursus},${c.status}`
+                                        `${c.kod_subjek},${c.nama_subjek},${c.seksyen},${c.sesi}-${c.semester},${c.kredit ?? ''},${c.tahun_kursus},${c.status}`
                                     ).join("\n");
                                 
                                 const link = document.createElement("a");
@@ -752,6 +824,15 @@ this.stats.totalStudents = matricSet.size;
 
                         async mounted() {
                             await this.loadAllCourses();
+
+                            this.$nextTick(() => {
+                                const tooltipTriggerList = [].slice.call(
+                                    document.querySelectorAll('[data-bs-toggle="tooltip"]')
+                                );
+                                tooltipTriggerList.forEach(el => {
+                                    new bootstrap.Tooltip(el);
+                                });
+                            });
                         },
 
                         methods: {
@@ -820,6 +901,38 @@ this.stats.totalStudents = matricSet.size;
                                         this.stats.totalStudents = 0;
                                     }
 
+                                    // ✅ Active lecturers (from pensyarah list page)
+                                    try {
+                                    const lecturers = await TTMS.fetchLecturers(); // entity=pensyarah
+
+                                    const activeSet = new Set(
+                                        (lecturers || [])
+                                        .filter(l => {
+                                            const bilSubjek = Number(l.bil_subjek || 0);
+                                            const bilSeksyen = Number(l.bil_seksyen || 0);
+                                            const bilPelajar = Number(l.bil_pelajar || 0);
+
+                                            // "Active" = has teaching load this session
+                                            return bilSubjek > 0 || bilSeksyen > 0 || bilPelajar > 0;
+                                        })
+                                        .map(l =>
+                                            String(
+                                            l.no_pekerja ||
+                                            l.kod_pensyarah ||
+                                            l.login_name ||
+                                            l.nama ||            // TTMS page shows "Nama"
+                                            ""
+                                            ).trim()
+                                        )
+                                        .filter(Boolean)
+                                    );
+
+                                    this.stats.totalLecturers = activeSet.size;
+                                    } catch (e) {
+                                    console.warn("⚠️ Unable to fetch lecturers count:", e);
+                                    this.stats.totalLecturers = 0;
+                                    }
+
                                     // ---- APPLY FILTERS LAST ----
                                     this.applyFilters();
 
@@ -832,15 +945,13 @@ this.stats.totalStudents = matricSet.size;
                             },
 
                             recomputeSummaryStats() {
-                                const list = Array.isArray(this.filteredCourses) ? this.filteredCourses : [];
+                                const list = Array.isArray(this.filteredCourses)
+                                    ? this.filteredCourses
+                                    : [];
 
-                                // Active courses: bil_pelajar > 0
-                                this.stats.activeCourses = list.filter(c => Number(c.bil_pelajar || 0) > 0).length;
-
-                                // Total lecturers: count rows that have any lecturer value (not unique)
-                                this.stats.totalLecturers = list.filter(c =>
-                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim() !== "" &&
-                                    String(c.kod_pensyarah || c.nama_pensyarah || "").trim().toUpperCase() !== "N/A"
+                                // 1️⃣ Active courses
+                                this.stats.activeCourses = list.filter(
+                                    c => Number(c.bil_pelajar || 0) > 0
                                 ).length;
                             },
 
@@ -1869,25 +1980,25 @@ mapDay(dayNumber) {
                                 
                                 // Grouped time blocks (8AM-11AM, 11AM-2PM, 2PM-5PM)
                                 timeBlocks: [
-                                    { 
-                                        id: 'morning', 
-                                        name: 'Morning', 
+                                    {
+                                        id: 'morning',
+                                        name: 'Morning',
                                         timeRange: '8:00 AM - 11:00 AM',
-                                        slots: [2, 3, 4, 5], // TTMS slots 2-5 (8AM-11AM)
+                                        slots: [2, 3, 4], // 8,9,10
                                         description: 'Morning classes'
                                     },
-                                    { 
-                                        id: 'afternoon', 
-                                        name: 'Afternoon', 
+                                    {
+                                        id: 'afternoon',
+                                        name: 'Afternoon',
                                         timeRange: '11:00 AM - 2:00 PM',
-                                        slots: [5, 6, 7, 8], // TTMS slots 5-8 (11AM-2PM)
+                                        slots: [5, 6, 7], // 11,12,1
                                         description: 'Afternoon classes'
                                     },
-                                    { 
-                                        id: 'evening', 
-                                        name: 'Evening', 
+                                    {
+                                        id: 'evening',
+                                        name: 'Evening',
                                         timeRange: '2:00 PM - 5:00 PM',
-                                        slots: [8, 9, 10], // TTMS slots 8-10 (2PM-5PM)
+                                        slots: [8, 9, 10], // 2,3,4
                                         description: 'Evening classes'
                                     }
                                 ],
@@ -1957,7 +2068,10 @@ mapDay(dayNumber) {
                                     if (this.userRole === 'student') {
                                         await this.loadStudentTimetable(user.username);
                                     } else if (this.userRole === 'lecturer') {
-                                        await this.loadLecturerTimetable(user.username);
+                                        const lecturerKey =
+                                            user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+
+                                        await this.loadLecturerTimetable(lecturerKey, user.name);
                                     } else {
                                         await this.loadAdminTimetable();
                                     }
@@ -2040,61 +2154,34 @@ mapDay(dayNumber) {
                                 }
                             },
                             
-                            async loadLecturerTimetable(lecturerId) {
+                            async loadLecturerTimetable(lecturerId, lecturerName = "") {
                                 try {
-                                    console.log(`👨‍🏫 Loading lecturer timetable for ${lecturerId}`);
-                                    
-                                    // Get current session
-                                    const currentSession = this.$parent.currentSession || { sesi: '2025/2026', semester: '1' };
-                                    
-                                    // Fetch lecturer's subjects
-                                    const lecturerSubjects = await TTMS.fetchLecturerSubjects(lecturerId);
-                                    
-                                    if (!lecturerSubjects || lecturerSubjects.length === 0) {
-                                        console.log('No subjects found for lecturer');
-                                        return;
+                                    console.log(`👨‍🏫 Loading lecturer timetable (DIRECT) for ${lecturerId} / ${lecturerName}`);
+
+                                    const entries = await TTMS.fetchLecturerTimetable(lecturerId, lecturerName);
+
+                                    if (!Array.isArray(entries) || entries.length === 0) {
+                                    console.warn("⚠️ No timetable entries found for lecturer heatmap");
+                                    return;
                                     }
-                                    
-                                    console.log(`📚 Found ${lecturerSubjects.length} teaching subjects`);
-                                    
-                                    // Filter for current session
-                                    const currentSubjects = lecturerSubjects.filter(subject => 
-                                        subject.sesi === currentSession.sesi && 
-                                        subject.semester.toString() === currentSession.semester
-                                    );
-                                    
-                                    this.myCourses = currentSubjects;
-                                    console.log(`📅 ${currentSubjects.length} subjects in current session`);
-                                    
-                                    // Get schedule for each subject
-                                    for (const subject of currentSubjects) {
-                                        if (!subject.kod_subjek) continue;
-                                        
-                                        try {
-                                            const schedule = await TTMS.fetchCourseSchedule(
-                                                subject.kod_subjek,
-                                                currentSession.sesi,
-                                                currentSession.semester,
-                                                subject.seksyen || null
-                                            );
-                                            
-                                            if (schedule && Array.isArray(schedule)) {
-                                                schedule.forEach(session => {
-                                                    this.mySessions.push({
-                                                        ...session,
-                                                        courseCode: subject.kod_subjek,
-                                                        courseName: subject.nama_subjek,
-                                                        section: subject.seksyen || 'N/A'
-                                                    });
-                                                });
-                                            }
-                                        } catch (error) {
-                                            console.warn(`Could not fetch schedule for ${subject.kod_subjek}:`, error);
-                                        }
-                                    }
-                                    
+
+                                    // Convert jadual_subjek entries into the shape your heatmap expects
+                                    entries.forEach(e => {
+                                    this.mySessions.push({
+                                        ...e,
+                                        courseCode: e.kod_subjek,
+                                        courseName: e.nama_subjek || e.kod_subjek,
+                                        section: String(e.seksyen || "1"),
+
+                                        // normalize room (your processMySessions uses kod_bilik OR ruang.kod_ruang)
+                                        kod_bilik: e.kod_bilik || e.kod_ruang || (e.ruang ? e.ruang.kod_ruang : null)
+                                    });
+                                    });
+
+                                    console.log(`✅ Lecturer heatmap sessions loaded: ${this.mySessions.length}`);
+
                                 } catch (error) {
-                                    console.error('Error loading lecturer timetable:', error);
+                                    console.error("❌ Error loading lecturer timetable for heatmap:", error);
                                     throw error;
                                 }
                             },
@@ -2126,8 +2213,8 @@ mapDay(dayNumber) {
                                 console.log(`🔄 Processing ${this.mySessions.length} personal class sessions`);
                                 
                                 this.mySessions.forEach(session => {
-                                    const day = session.hari;   // TTMS day number (2-6)
-                                    const slot = session.masa;  // TTMS time slot (1-10)
+                                    const day = Number(session.hari);   // TTMS day number (2-6)
+                                    const slot = Number(session.masa);  // TTMS time slot (1-10)
                                     
                                     // Only process weekdays 2-6
                                     if (day >= 2 && day <= 6) {
@@ -2143,8 +2230,10 @@ mapDay(dayNumber) {
                                                 courseName: session.courseName,
                                                 room: session.kod_bilik || (session.ruang ? session.ruang.kod_ruang : 'N/A'),
                                                 section: session.section,
-                                                slot: slot,
-                                                time: this.getTimeForSlot(slot)
+                                                slot,
+                                                timeRange: this.getTimeRangeForSlot(slot),
+                                                startTime: this.getStartTimeForSlot(slot),
+                                                endTime: this.getEndTimeForSlot(slot),
                                             });
                                             
                                             // Count as one task
@@ -2155,20 +2244,40 @@ mapDay(dayNumber) {
                             },
                             
                             getBlockForSlot(slot) {
-                                // Map TTMS slot to our time blocks
-                                if ([2, 3, 4, 5].includes(slot)) return 'morning';    // 8AM-11AM
-                                if ([5, 6, 7, 8].includes(slot)) return 'afternoon';  // 11AM-2PM
-                                if ([8, 9, 10].includes(slot)) return 'evening';      // 2PM-5PM
-                                return null; // Slot 1 (7AM) or other non-included slots
+                                const s = Number(slot); // important
+                                if ([2, 3, 4].includes(s)) return 'morning';
+                                if ([5, 6, 7].includes(s)) return 'afternoon';
+                                if ([8, 9, 10].includes(s)) return 'evening';
+                                return null; // exclude slot 1 (7AM) and others
                             },
                             
-                            getTimeForSlot(slot) {
-                                // Convert TTMS slot to time string
-                                const slotTimes = {
-                                    1: '7:00 AM', 2: '8:00 AM', 3: '9:00 AM', 4: '10:00 AM', 5: '11:00 AM',
-                                    6: '12:00 PM', 7: '1:00 PM', 8: '2:00 PM', 9: '3:00 PM', 10: '4:00 PM'
+                            getTimeRangeForSlot(slot) {
+                                const ranges = {
+                                    1:  '7:00 AM - 7:50 AM',
+                                    2:  '8:00 AM - 8:50 AM',
+                                    3:  '9:00 AM - 9:50 AM',
+                                    4:  '10:00 AM - 10:50 AM',
+                                    5:  '11:00 AM - 11:50 AM',
+                                    6:  '12:00 PM - 12:50 PM',
+                                    7:  '1:00 PM - 1:50 PM',
+                                    8:  '2:00 PM - 2:50 PM',
+                                    9:  '3:00 PM - 3:50 PM',
+                                    10: '4:00 PM - 4:50 PM',
+                                    11: '5:00 PM - 5:50 PM',
+                                    12: '6:00 PM - 6:50 PM',
+                                    13: '7:00 PM - 7:50 PM',
+                                    14: '8:00 PM - 8:50 PM',
+                                    15: '9:00 PM - 9:50 PM'
                                 };
-                                return slotTimes[slot] || `Slot ${slot}`;
+                                return ranges[Number(slot)] || `Slot ${slot}`;
+                            },
+
+                            getStartTimeForSlot(slot) {
+                                return this.getTimeRangeForSlot(slot).split(' - ')[0];
+                            },
+
+                            getEndTimeForSlot(slot) {
+                                return this.getTimeRangeForSlot(slot).split(' - ')[1];
                             },
                             
                             // ============ PERSONAL STATISTICS ============
@@ -2810,26 +2919,36 @@ mapDay(dayNumber) {
                                 const blockObj = this.timeBlocks.find(b => b.id === blockId);
                                 const key = `${day}-${blockId}`;
                                 const data = this.blockData[key];
-                                
+
                                 const taskCount = data?.taskCount || 0;
-                                const sessions = data?.sessions || [];
-                                
+                                const sessions = (data?.sessions || []).map(s => ({
+                                    ...s,
+                                    slot: Number(s.slot),
+                                })).sort((a,b) => a.slot - b.slot);
+
+                                // ✅ REAL time range for modal (min slot start → max slot end)
+                                let realTimeRange = blockObj ? blockObj.timeRange : '';
+                                if (sessions.length > 0) {
+                                    const minSlot = sessions[0].slot;
+                                    const maxSlot = sessions[sessions.length - 1].slot;
+                                    realTimeRange = `${this.getStartTimeForSlot(minSlot)} - ${this.getEndTimeForSlot(maxSlot)}`;
+                                }
+
                                 this.selectedBlock = {
                                     dayId: day,
                                     dayName: dayObj ? dayObj.name : 'Day ' + day,
-                                    blockId: blockId,
+                                    blockId,
                                     blockName: blockObj ? blockObj.name : 'Block ' + blockId,
-                                    timeRange: blockObj ? blockObj.timeRange : '',
+
+                                    // ✅ use real range instead of fixed label
+                                    timeRange: realTimeRange,
+
                                     isBusy: taskCount > 0,
-                                    sessions: sessions
+                                    sessions
                                 };
-                                
-                                // Show modal using Bootstrap
+
                                 const modalElement = document.getElementById('blockDetailsModal');
-                                if (modalElement) {
-                                    const modal = new bootstrap.Modal(modalElement);
-                                    modal.show();
-                                }
+                                if (modalElement) new bootstrap.Modal(modalElement).show();
                             },
                             
                             // ============ DAY ANALYSIS GETTERS ============
@@ -2956,7 +3075,7 @@ mapDay(dayNumber) {
             }
         });
         
-        app.mount('#app');
+        window.vm = app.mount('#app');   // vm = Vue root instance (has vm.user)
     </script>
 </body>
 </html>

@@ -148,6 +148,11 @@
             </div>
         </div>
 
+        <div class="alert alert-info py-2 mb-3">
+            <i class="fas fa-info-circle me-2"></i>
+                You can <strong>click on any bar</strong> in the charts below to view the detailed list of rooms.
+        </div>
+
         <div class="row">
             <div class="col-md-6">
                 <div class="card mb-4">
@@ -176,5 +181,24 @@
             </div>
         </div>
 
+        <!-- Room List Modal (reusable for N28 / N28A) -->
+        <div class="modal fade" id="roomListModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                <div class="modal-header" style="background:#2E7D32; color:white;">
+                    <h5 class="modal-title" id="roomListModalTitle">Room List</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body" id="roomListModalBody">
+                    <!-- list injected by JS -->
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>   

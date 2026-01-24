@@ -31,14 +31,19 @@
                         <option value="2024/2025-1">2024/2025 Semester 1</option>
                     </select>
                 </div>
+                <!-- Search Bar -->
                 <div class="col-md-4">
-                    <label class="form-label">Course Status</label>
-                    <select class="form-select" v-model="filterStatus" @change="applyFilters">
-                        <option value="all">All Status</option>
-                        <option value="UM">Core (UM)</option>
-                        <option value="E">Elective (E)</option>
-                        <option value="O">Optional (O)</option>
-                    </select>
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    <input
+                        type="text"
+                        class="form-control"
+                        v-model="searchTerm"
+                        @input="applyFilters"
+                        placeholder="Search course code, name, lecturer..."
+                    />
+                    </div>
                 </div>
                 <div class="col-md-4 d-flex align-items-end">
                     <div class="d-flex gap-2 w-100">
@@ -83,6 +88,7 @@
                             <th>Course Name</th>
                             <th>Section</th>
                             <th>Session</th>
+                            <th>Lecturer</th>
                             <th>Year</th>
                             <th>Status</th>
                         </tr>
@@ -100,6 +106,7 @@
                                 <span class="badge bg-info">Section {{ course.seksyen || 'N/A' }}</span>
                             </td>
                             <td>{{ course.sesi || 'N/A' }}-{{ course.semester || 'N/A' }}</td>
+                            <td>{{ course.nama_pensyarah ?? 'N/A' }}</td>
                             <td>{{ course.tahun_kursus || 'N/A' }}</td>
                             <td>
                                 <span class="badge" 

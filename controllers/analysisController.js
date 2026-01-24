@@ -56,43 +56,80 @@ class AnalysisController {
     }
     
     // Load workload chart
+    // controllers/analysisController.js
+    // Load workload chart
     async loadWorkloadChart() {
-        try {
-            const workloadData = await TTMS.fetchLecturerWorkload();
-            
-            if (workloadData.length === 0) {
-                console.warn('No workload data available');
-                return;
-            }
-            
-            google.charts.setOnLoadCallback(() => {
-                const data = new google.visualization.DataTable();
-                data.addColumn('string', 'Lecturer');
-                data.addColumn('number', 'Hours');
-                
-                workloadData.forEach(item => {
-                    data.addRow([item.lecturer, item.hours]);
-                });
-                
-                const options = {
-                    title: 'Lecturer Workload Distribution',
-                    is3D: false,
-                    colors: ['#2E7D32', '#4CAF50', '#81C784', '#A5D6A7'],
-                    backgroundColor: 'transparent',
-                    chartArea: { width: '90%', height: '80%' }
-                };
-                
-                const container = document.getElementById('workloadChart');
-                if (container) {
-                    const chart = new google.visualization.PieChart(container);
-                    chart.draw(data, options);
-                    this.charts.workload = chart;
-                }
-            });
-        } catch (error) {
-            console.error('Error loading workload chart:', error);
+    const showLoader = () => {
+        const el = document.getElementById('workloadLoading');
+        if (el) el.style.display = 'block';
+    };
+
+    const hideLoader = () => {
+        const el = document.getElementById('workloadLoading');
+        if (el) el.style.display = 'none';
+    };
+
+    const chartEl = document.getElementById('workloadChart');
+
+    try {
+        const user = JSON.parse(localStorage.getItem('user'));
+        if (!user) return;
+
+        showLoader();
+        if (chartEl) chartEl.innerHTML = '';
+
+        const lecturerKey =
+        user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+        const lecturerName = user.name || user.nama || "";
+
+        const workloadData = await TTMS.fetchLecturerCourseWorkload(
+        lecturerKey,
+        lecturerName
+        );
+
+        if (!workloadData || workloadData.length === 0) {
+        if (chartEl) {
+            chartEl.innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-info-circle fa-2x mb-2"></i><br>
+                No teaching workload found for this session.
+            </div>
+            `;
         }
+        return;
+        }
+
+        google.charts.setOnLoadCallback(() => {
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Course');
+        data.addColumn('number', 'Hours/Week');
+
+        workloadData.forEach(item => {
+            data.addRow([`${item.courseCode} (${item.section})`, item.hours]);
+        });
+
+        const options = {
+            chartArea: { width: '90%', height: '80%' },
+            backgroundColor: 'transparent'
+        };
+
+        const chart = new google.visualization.PieChart(chartEl);
+        chart.draw(data, options);
+
+        // ✅ Hide loader AFTER chart successfully draws
+        hideLoader();
+
+        this.charts.workload = chart;
+        });
+
+    } catch (err) {
+        console.error('Workload chart error:', err);
+    } finally {
+        // ✅ Also hide loader here (covers errors/early exits)
+        hideLoader();
     }
+    }
+
 
     getSessionCategory(jenis) {
         if (!jenis) return 'other';
@@ -271,10 +308,18 @@ class AnalysisController {
             // ===============================
             const { sesi, semester } = TTMS.getCurrentSession();
 
-            const subjects =
-            user.role === "student"
-                ? await TTMS.fetchMyCourses(user.username)
-                : await TTMS.fetchLecturerSubjects(user.username);
+            let subjects = [];
+            if (user.role === "student") {
+                subjects = await TTMS.fetchMyCourses(user.username);
+            } else if (user.role === "lecturer") {
+            const lecturerIdRaw =
+                user.no_pekerja || user.kod_pensyarah || user.login_name || user.username || "";
+                subjects = await TTMS.fetchLecturerSubjects(lecturerIdRaw);
+            } else {
+            // admin/others: do nothing (or return)
+            return;
+            }
+
 
             const currentSubjects = subjects.filter(
             (s) => s.sesi === sesi && String(s.semester) === String(semester)

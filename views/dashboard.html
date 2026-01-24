@@ -95,17 +95,27 @@
     <div class="row mb-4">
         <!-- Workload Chart (Hidden from students) -->
         <div v-if="$parent.user.role !== 'student'" class="col-lg-6 mb-4">
-            <div class="chart-container">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h5 class="mb-0">
-                        <i class="fas fa-chalkboard-teacher text-success me-2"></i>
-                        Lecturer Workload
-                    </h5>
-                    <span class="badge badge-utm">TTMS Data</span>
-                </div>
-                <div id="workloadChart" style="height: 300px;"></div>
+        <div class="chart-container">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">
+                <i class="fas fa-chalkboard-teacher text-success me-2"></i>
+                Weekly Lecturer Workload
+            </h5>
             </div>
+
+            <!-- 🔄 Loading state -->
+            <div id="workloadLoading" class="text-center py-4">
+                <button class="btn btn-outline-success" disabled>
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    Loading workload...
+                </button>
+            </div>
+
+            <!-- 📊 Chart -->
+            <div id="workloadChart" style="height: 300px;"></div>
         </div>
+        </div>
+
         
         <!-- Daily Distribution Chart -->
         <div class="col-md-6 mt-4">

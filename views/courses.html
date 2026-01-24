@@ -5,7 +5,7 @@
             <h2 class="text-dark mb-1">
                 <i class="fas fa-list text-success me-2"></i>
                 {{ $parent.user.role === 'student' ? 'Course Catalog' : 
-                   $parent.user.role === 'lecturer' ? 'Teaching Schedule' : 'Course Management' }}
+                   $parent.user.role === 'lecturer' ? 'Course List' : 'Course Management' }}
             </h2>
             <p class="text-muted mb-0">
                 Browse and filter courses by session and faculty
@@ -68,7 +68,10 @@
     <!-- Statistics Summary -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="card bg-light">
+            <div class="card bg-light"
+                    data-bs-toggle="tooltip"
+                    data-bs-placement="top"
+                    :title="`Courses currently shown after filters (Faculty: ${filterFaculty}, Search: ${searchTerm || 'none'})`">
                 <div class="card-body text-center py-3">
                     <h4 class="text-primary mb-1">{{ filteredCourses.length }}</h4>
                     <small class="text-muted">Showing</small>
@@ -76,7 +79,10 @@
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card bg-light">
+            <div class="card bg-light"
+                    data-bs-toggle="tooltip"
+                    data-bs-placement="top"
+                    title="Courses with at least 1 enrolled student in the selected session">
                 <div class="card-body text-center py-3">
                     <h4 class="text-success mb-1">{{ stats.activeCourses }}</h4>
                     <small class="text-muted">Active Courses</small>
@@ -84,7 +90,10 @@
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card bg-light">
+            <div class="card bg-light"
+                data-bs-toggle="tooltip"
+                data-bs-placement="top"
+                :title="`Unique enrolled students in ${currentSession.sesi}-${currentSession.semester}`">
                 <div class="card-body text-center py-3">
                     <h4 class="text-info mb-1">{{ stats.totalStudents }}</h4>
                     <small class="text-muted">Total Students</small>
@@ -92,10 +101,12 @@
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card bg-light">
+            <div class="card bg-light"
+                    data-bs-toggle="tooltip"
+                    :title="`Lecturers actively teaching in ${currentSession.sesi}-${currentSession.semester}`">
                 <div class="card-body text-center py-3">
                     <h4 class="text-warning mb-1">{{ stats.totalLecturers }}</h4>
-                    <small class="text-muted">Total Lecturers</small>
+                    <small class="text-muted">Active Lecturers</small>
                 </div>
             </div>
         </div>

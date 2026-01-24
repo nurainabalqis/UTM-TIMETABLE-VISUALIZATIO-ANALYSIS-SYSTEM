@@ -245,6 +245,56 @@ const TTMS = {
         }
     },
 
+    async fetchPublic(entity, params = {}) {
+        try {
+            const currentSession = this.getCurrentSession();
+            const baseParams = {
+            entity,
+            sesi: params.sesi || currentSession.sesi,
+            semester: params.semester || currentSession.semester,
+            ...params
+            };
+
+            Object.keys(baseParams).forEach((k) => {
+            if (baseParams[k] === undefined || baseParams[k] === null) delete baseParams[k];
+            });
+
+            const queryString = Object.entries(baseParams)
+            .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+            .join("&");
+
+            const url = `${this.BASE_URL}?${queryString}`;
+            console.log(`📡 Fetching PUBLIC ${entity}:`, url);
+
+            const response = await fetch(url);
+            const text = await response.text();
+
+            console.log(`📥 Raw PUBLIC response for ${entity}:`, text.substring(0, 200));
+
+            let data;
+            try {
+            data = JSON.parse(text);
+            } catch (parseError) {
+            const jsonMatch = text.match(/\[.*\]|\{.*\}/s);
+            if (!jsonMatch) return [];
+            data = JSON.parse(jsonMatch[0]);
+            }
+
+            if (Array.isArray(data)) return data;
+            if (data && typeof data === "object") {
+            if (data[entity] && Array.isArray(data[entity])) return data[entity];
+            const values = Object.values(data);
+            if (values.length > 0 && Array.isArray(values[0])) return values[0];
+            return values;
+            }
+
+            return [];
+        } catch (e) {
+            console.error(`❌ fetchPublic(${entity}) error:`, e);
+            return [];
+        }
+    },
+
     // ============ SPECIFIC ENTITY FETCHERS ============
 
     async fetchCourseSchedule(courseCode, sesi = null, semester = null, section = null) {
@@ -855,42 +905,202 @@ async fetchLecturerTimetable(lecturerId, lecturerName = "") {
 
     // ============ ANALYTICS (Derived from real data) ============
     
-    async fetchLecturerWorkload() {
+// ============ ANALYTICS (Derived from real data) ============
+
+// models/ttmsModel.js
+// models/ttmsModel.js
+async fetchLecturerWorkload() {
+  try {
+    const userStr = localStorage.getItem("user");
+    const user = userStr ? JSON.parse(userStr) : null;
+    if (!user) return [];
+
+    const { sesi, semester } = this.getCurrentSession();
+    const Sem = String(semester);
+
+    // lecturer identity candidates
+    const lecturerIdRaw =
+      user.no_pekerja || user.kod_pensyarah || user.login_name || user.username || "";
+    const lecturerId = String(lecturerIdRaw).includes("@")
+      ? String(lecturerIdRaw).split("@")[0]
+      : String(lecturerIdRaw);
+
+    const lecturerName = (user.name || user.nama || user.fullname || "").trim();
+
+    const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, " ").trim();
+    const idNorm = norm(lecturerId);
+    const nameTokens = norm(lecturerName).split(" ").filter(Boolean);
+
+    const matchesLecturer = (row) => {
+      // Try matching by ID across common TTMS fields
+      const idFields = [
+        row.no_pekerja, row.kod_pensyarah, row.login_name, row.username, row.no_kp, row.kod, row.id
+      ].map(norm);
+
+      if (idNorm && idFields.some(v => v && (v === idNorm || v.includes(idNorm)))) return true;
+
+      // Fallback: match by name tokens (safer than exact match)
+      const candName = norm(row.nama || row.nama_pensyarah || row.name);
+      if (candName && nameTokens.length > 0) {
+        return nameTokens.every(t => candName.includes(t));
+      }
+      return false;
+    };
+
+    // 1) all subjects this session
+    const subjects = await this.fetchWithAdminSession("subjek", { sesi, semester: Sem });
+    if (!Array.isArray(subjects) || subjects.length === 0) return [];
+
+    // 2) for each subject, check if YOU are assigned in subjek_pensyarah
+    const courseHours = new Map();
+
+    const toMin = (t) => {
+      const m = String(t || "").match(/(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    };
+
+    const getHours = (row) => {
+      // preferred: "masa" range "08:00-10:00"
+      if (row?.masa && String(row.masa).includes("-")) {
+        const [a, b] = String(row.masa).split("-").map(x => x.trim());
+        const s = toMin(a), e = toMin(b);
+        if (s != null && e != null && e > s) return (e - s) / 60;
+      }
+      // fallback: numeric jam
+      if (row?.jam != null) {
+        const n = Number(row.jam);
+        if (!Number.isNaN(n) && n > 0) return n;
+      }
+      // safe default if TTMS doesn’t expose duration
+      return 2;
+    };
+
+    // process subjects sequentially (avoids hammering TTMS)
+    for (const subj of subjects) {
+      if (!subj?.kod_subjek) continue;
+
+      // who teaches this subject?
+      let lecturerRows = [];
+      try {
+        lecturerRows = await this.fetchWithAdminSession("subjek_pensyarah", {
+          kod_subjek: subj.kod_subjek,
+          sesi,
+          semester: Sem
+        });
+      } catch (_) {}
+
+      if (!Array.isArray(lecturerRows) || lecturerRows.length === 0) continue;
+
+      const myRows = lecturerRows.filter(matchesLecturer);
+      if (myRows.length === 0) continue;
+
+      // for each matching section, fetch timetable
+      for (const r of myRows) {
+        const seksyen = String(r.seksyen || "").trim();
+        if (!seksyen) continue;
+
+        let jadual = [];
         try {
-            const courses = await this.fetchCourses();
-            if (courses.length === 0) return [];
+          jadual = await this.fetchWithAdminSession("jadual_subjek", {
+            kod_subjek: subj.kod_subjek,
+            seksyen,
+            sesi,
+            semester: Sem
+          });
+        } catch (_) {}
 
-            const workloadMap = {};
-            courses.forEach(course => {
-                const lecturer = course.nama_pensyarah || course.kod_pensyarah || 'Unknown';
-                if (!lecturer || lecturer === 'N/A') return;
-                
-                const students = parseInt(course.bil_pelajar) || 30;
-                const hours = Math.max(1, Math.ceil(students / 30));
+        if (!Array.isArray(jadual) || jadual.length === 0) continue;
 
-                if (!workloadMap[lecturer]) {
-                    workloadMap[lecturer] = {
-                        lecturer: lecturer,
-                        hours: 0,
-                        courseCount: 0
-                    };
-                }
+        // de-dupe slots so repeated rows don’t inflate
+        const uniqKeys = new Set(jadual.map(j => `${j.hari || ""}-${j.masa || ""}-${j.ruang || ""}`));
 
-                workloadMap[lecturer].hours += hours;
-                workloadMap[lecturer].courseCount += 1;
-            });
-
-            const result = Object.values(workloadMap)
-                .sort((a, b) => b.hours - a.hours)
-                .slice(0, 10);
-                
-            console.log(`✅ Lecturer workload: ${result.length} lecturers`);
-            return result;
-            
-        } catch (error) {
-            console.error('Error fetching lecturer workload:', error);
-            return [];
+        let total = 0;
+        for (const k of uniqKeys) {
+          const one = jadual.find(j => `${j.hari || ""}-${j.masa || ""}-${j.ruang || ""}` === k);
+          total += getHours(one);
         }
+
+        const label = `${subj.kod_subjek} (${seksyen})`;
+        courseHours.set(label, (courseHours.get(label) || 0) + total);
+      }
+    }
+
+    // ✅ output shape expected by your existing pie chart loader
+    return Array.from(courseHours.entries())
+      .map(([label, hours]) => ({ lecturer: label, hours }))
+      .filter(x => x.hours > 0)
+      .sort((a, b) => b.hours - a.hours);
+
+  } catch (e) {
+    console.error("fetchLecturerWorkload (from timetable) error:", e);
+    return [];
+  }
+},
+
+ // models/ttmsModel.js
+    async fetchLecturerCourseWorkload(lecturerKey, lecturerName = "", sesi = null, semester = null) {
+    const current = this.getCurrentSession();
+    const S = sesi || current.sesi;
+    const Sem = String(semester || current.semester);
+
+    // ✅ Use the working lecturer timetable builder (matches lecturer by NAME)
+    const timetableEntries = await this.fetchLecturerTimetable(lecturerKey, lecturerName);
+    if (!Array.isArray(timetableEntries) || timetableEntries.length === 0) return [];
+
+    // Optional filter (if entries include sesi/semester)
+    const entries = timetableEntries.filter(e => {
+        const has = e.sesi != null && e.semester != null;
+        if (!has) return true;
+        return String(e.sesi) === String(S) && String(e.semester) === String(Sem);
+    });
+
+    const toMin = (t) => {
+        const m = String(t || "").match(/(\d{1,2}):(\d{2})/);
+        if (!m) return null;
+        return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    };
+
+    const getHours = (sess) => {
+        // Preferred: "masa" range like "08:00-10:00"
+        if (sess?.masa && typeof sess.masa === "string" && sess.masa.includes("-")) {
+        const [a, b] = sess.masa.split("-").map(x => x.trim());
+        const start = toMin(a), end = toMin(b);
+        if (start != null && end != null && end > start) return (end - start) / 60;
+        }
+
+        // Sometimes TTMS returns jam or duration-ish fields
+        if (sess?.jam != null) {
+        const n = Number(sess.jam);
+        if (!Number.isNaN(n) && n > 0) return n;
+        }
+
+        // Fallback: 1 slot ≈ 1 hour
+        return 1;
+    };
+
+    const courseHours = new Map();
+
+    for (const e of entries) {
+        const courseCode = e.kod_subjek || e.courseCode;
+        if (!courseCode) continue;
+
+        const courseName = e.nama_subjek || e.courseName || "";
+        const section = String(e.seksyen || e.section || "N/A");
+
+        const key = `${courseCode}||${courseName}||${section}`;
+        const hours = getHours(e);
+
+        courseHours.set(key, (courseHours.get(key) || 0) + hours);
+    }
+
+    return Array.from(courseHours.entries())
+        .map(([key, hours]) => {
+        const [courseCode, courseName, section] = key.split("||");
+        return { courseCode, courseName, section, hours };
+        })
+        .filter(x => x.hours > 0)
+        .sort((a, b) => b.hours - a.hours);
     },
 
     async fetchWeeklyUsagePattern() {
