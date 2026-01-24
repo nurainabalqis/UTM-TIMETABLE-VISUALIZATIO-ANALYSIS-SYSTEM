@@ -508,66 +508,102 @@ class AnalysisController {
         }
     }
 
-    async getPeakHoursFromMyTimetable(user) {
+async getPeakHoursFromMyTimetable(user) {
+  const hourMap = {}; // { 8: { count: 2, days: Set(...) }, ... }
+
+  // helper: convert slot to hour
+  const slotToHour = {
+    1: 7, 2: 8, 3: 9, 4: 10, 5: 11,
+    6: 12, 7: 13, 8: 14, 9: 15, 10: 16, 11: 17, 12: 18
+  };
+
+  // ===== STUDENT: keep existing logic (works) =====
+  if (user.role === "student") {
     const { sesi, semester } = TTMS.getCurrentSession();
 
-    const subjects = user.role === 'student'
-        ? await TTMS.fetchMyCourses(user.username)
-        : await TTMS.fetchLecturerSubjects(user.username);
-
-    const currentSubjects = subjects.filter(s =>
-        s.sesi === sesi && String(s.semester) === String(semester)
+    const subjects = await TTMS.fetchMyCourses(user.username);
+    const currentSubjects = subjects.filter(
+      s => s.sesi === sesi && String(s.semester) === String(semester)
     );
 
-    const hourMap = {}; // { '8': count, '9': count, ... }
-
     for (const subject of currentSubjects) {
-        if (!subject.kod_subjek || !subject.seksyen) continue;
+      if (!subject.kod_subjek || !subject.seksyen) continue;
 
-        const timetable = await TTMS.fetchCourseSchedule(
-            subject.kod_subjek,
-            sesi,
-            semester,
-            subject.seksyen
-        );
+      const timetable = await TTMS.fetchCourseSchedule(
+        subject.kod_subjek, sesi, semester, subject.seksyen
+      );
 
-        if (!Array.isArray(timetable)) continue;
+      if (!Array.isArray(timetable)) continue;
 
-        timetable.forEach(slot => {
-            let hour = null;
+      timetable.forEach(slot => {
+        let hour = null;
 
-// Prefer real time if exists
-if (slot.jam) {
-    hour = parseInt(slot.jam.split(':')[0]);
-}
-// Otherwise derive from TTMS masa slot
-else if (slot.masa) {
-    const slotToHour = {
-        1: 7,
-        2: 8,   // ✅ THIS is why 8 AM returns
-        3: 9,
-        4: 10,
-        5: 11,
-        6: 12,
-        7: 13,
-        8: 14,
-        9: 15,
-        10: 16
-    };
+        if (slot.jam) hour = parseInt(String(slot.jam).split(":")[0], 10);
+        else if (slot.masa) hour = slotToHour[slot.masa];
 
-    hour = slotToHour[slot.masa];
-}
+        const dayName = TTMS.getDayNameFromHari(slot.hari);
+        if (!dayName || hour == null) return;
 
-if (!hour) return;
+        if (!hourMap[hour]) hourMap[hour] = { count: 0, days: new Set() };
 
-hourMap[hour] = (hourMap[hour] || 0) + 1;
-
-        });
+        const key = `${dayName}-${hour}`;
+        if (!hourMap[hour].days.has(key)) {
+          hourMap[hour].count++;
+          hourMap[hour].days.add(key);
+        }
+      });
     }
 
     return Object.entries(hourMap)
-        .map(([hour, count]) => ({ hour: `${hour}:00`, count }))
-        .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+      .map(([hour, data]) => ({ hour: `${hour}:00`, count: data.count }))
+      .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+  }
+
+  // ===== LECTURER: FIXED SOURCE =====
+  const lecturerKey =
+    user.no_pekerja || user.kod_pensyarah || user.login_name || user.username;
+  const lecturerName = (user.name || user.nama || "").trim();
+
+  console.log("✅ PeakHours lecturerKey:", lecturerKey, "lecturerName:", lecturerName);
+
+  // ✅ Use the working timetable builder (matches lecturer by NAME)
+  const timetableEntries = await TTMS.fetchLecturerTimetable(lecturerKey, lecturerName);
+  console.log("✅ PeakHours timetableEntries:", timetableEntries?.length);
+
+  if (!Array.isArray(timetableEntries) || timetableEntries.length === 0) return [];
+
+  timetableEntries.forEach(slot => {
+    let hour = null;
+
+    // Prefer real "jam" like "08:00-10:00" or "08:00"
+    if (slot.masa && typeof slot.masa === "string" && slot.masa.includes("-")) {
+      const start = slot.masa.split("-")[0].trim();
+      hour = parseInt(start.split(":")[0], 10);
+    } else if (slot.jam) {
+      hour = parseInt(String(slot.jam).split(":")[0], 10);
+    } else if (slot.masa != null && typeof slot.masa !== "string") {
+      hour = slotToHour[slot.masa];
+    } else if (slot.masa != null && typeof slot.masa === "string") {
+      // sometimes masa might still be "08:00"
+      hour = parseInt(slot.masa.split(":")[0], 10);
+    }
+
+    const dayName = TTMS.getDayNameFromHari(slot.hari);
+    if (!dayName || hour == null || Number.isNaN(hour)) return;
+
+    if (!hourMap[hour]) hourMap[hour] = { count: 0, days: new Set() };
+
+    // ✅ count once per day per hour
+    const key = `${dayName}-${hour}`;
+    if (!hourMap[hour].days.has(key)) {
+      hourMap[hour].count++;
+      hourMap[hour].days.add(key);
+    }
+  });
+
+  return Object.entries(hourMap)
+    .map(([hour, data]) => ({ hour: `${hour}:00`, count: data.count }))
+    .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
 }
 
     
