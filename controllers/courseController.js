@@ -149,7 +149,7 @@ const CourseController = {
                 const faculty = course.kod_subjek.substring(0, 2);
                 if (faculty) faculties.add(faculty);
             }
-            totalStudents += parseInt(course.bil_pelajar) || 0;
+            totalStudents += parseInt(course.bil_pelajar) ;
         });
         
         return {

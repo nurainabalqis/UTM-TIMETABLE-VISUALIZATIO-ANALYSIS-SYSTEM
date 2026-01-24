@@ -1,5 +1,4 @@
 // models/ttmsModel.js - FIXED VERSION
-// Add this near the top of ttmsModel.js, after the TTMS object definition
 const MASA_TO_HOUR = {
     1: 7,   // 07:00
     2: 8,   // 08:00
@@ -144,7 +143,7 @@ const TTMS = {
         } else if (desc.includes('pelajar') || desc.includes('student')) {
             return 'student';
         } else if (username.toLowerCase().includes('admin') || 
-                   desc.includes('admin') || desc.includes('administrator')) {
+                    desc.includes('admin') || desc.includes('administrator')) {
             return 'admin';
         }
         return 'student'; // default
@@ -440,8 +439,6 @@ async fetchSubjects(sesi, semester) {
         return [];
     }
 },
-
-
 
 async fetchLecturerTimetable(lecturerId, lecturerName = "") {
     try {
@@ -1213,7 +1210,7 @@ async fetchLecturerWorkload() {
         };
 
     } catch (err) {
-        console.error('❌ Lecturer peak hours error:', err);
+        console.error('Lecturer peak hours error:', err);
         return {
             status: 'ERROR',
             message: 'Unable to load teaching data at this time.',
@@ -1225,7 +1222,7 @@ async fetchLecturerWorkload() {
     // =================  FIXED PEAK STUDY HOURS (STUDENT) =================
     async fetchPeakStudyHoursForStudent(user) {
         try {
-            console.log('📊 Fetching REAL peak study hours for student');
+            console.log('Fetching REAL peak study hours for student');
 
             const currentSession = this.getCurrentSession();
             const hourMap = {};
@@ -1233,7 +1230,7 @@ async fetchLecturerWorkload() {
             // 1. Get student's enrolled subjects
             const subjects = await this.fetchMyCourses(user.username);
             if (!subjects.length) {
-                console.warn('⚠️ Student has no subjects');
+                console.warn('Student has no subjects');
                 return [];
             }
 
@@ -1243,7 +1240,7 @@ async fetchLecturerWorkload() {
                 String(s.semester) === String(currentSession.semester)
             );
 
-            console.log(`📚 Student current subjects: ${currentSubjects.length}`);
+            console.log(`Student current subjects: ${currentSubjects.length}`);
 
             if (!currentSubjects.length) return [];
 
@@ -1294,12 +1291,12 @@ async fetchLecturerWorkload() {
                         }
                     });
                 } catch (err) {
-                    console.warn(`❌ Error fetching timetable for ${subject.kod_subjek}:`, err);
+                    console.warn(` Error fetching timetable for ${subject.kod_subjek}:`, err);
                     continue;
                 }
             }
 
-            console.log('🔥 Student hourMap:', hourMap);
+            console.log('Student hourMap:', hourMap);
 
             // 4. Convert to array format for chart
             const result = Object.entries(hourMap)
@@ -1309,7 +1306,7 @@ async fetchLecturerWorkload() {
                 }))
                 .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
 
-            console.log('✅ Peak study hours:', result);
+            console.log(' Peak study hours:', result);
 
             // 5. Find peak hour and day for display
             if (result.length > 0) {
@@ -1333,112 +1330,10 @@ async fetchLecturerWorkload() {
             return result;
 
         } catch (err) {
-            console.error('❌ Error fetching peak study hours:', err);
+            console.error(' Error fetching peak study hours:', err);
             return [];
         }
     },
-
-    async fetchAvailableStudySpaces({ day = '', timeBlock = '', roomType = '' }) {
-        const MASA_TO_HOUR = {
-            1: 7, 2: 8, 3: 9, 4: 10, 5: 11,
-            6: 12, 7: 13, 8: 14, 9: 15, 10: 16
-        };
-
-        const { sesi, semester } = this.getCurrentSession();
-
-        // 1. Get all rooms
-        const allRooms = await this.fetchRooms();
-
-        // 2. Filter to N28 & N28A only
-        const fcRooms = allRooms.filter(r => {
-            const building = this.getBuildingFromRoomCode(r.kod_ruang);
-            return building === 'N28' || building === 'N28A';
-        });
-
-        // 3. Filter by room type (if selected)
-        const filteredRooms = roomType
-            ? fcRooms.filter(r => {
-            const jenis = (r.jenis || '').toLowerCase();
-
-            if (roomType === 'others') {
-                return !jenis;
-            }
-
-            return jenis.includes(roomType);
-        })
-        : fcRooms;
-
-        const availableRooms = [];
-
-        // 4. Check schedule for each room
-        for (const room of filteredRooms) {
-
-            let schedule = await this.fetchWithAdminSession('jadual_ruang', {
-                kod_ruang: room.kod_ruang,
-                sesi,
-                semester
-            });
-
-            // If no schedule → available all day
-            if (!Array.isArray(schedule) || schedule.length === 0) {
-                availableRooms.push(room);
-                continue;
-            }
-
-            // FILTER BY DAY
-            if (day) {
-                schedule = schedule.filter(s => String(s.hari) === String(day));
-            }
-
-            // Check conflict by time block
-            const hasConflict = timeBlock
-                ? schedule.some(slot => {
-                    const hour = slot.masa ? MASA_TO_HOUR[slot.masa] : null;
-                    if (!hour) return false;
-
-                    if (timeBlock === 'morning') return hour >= 8 && hour < 12;
-                    if (timeBlock === 'afternoon') return hour >= 12 && hour < 18;
-                    if (timeBlock === 'evening') return hour >= 18;
-
-                    return false;
-                })
-                : false; // ✅ no conflict when "Any Time"
-
-            if (!hasConflict) {
-                availableRooms.push(room);
-            }
-        }
-
-        return availableRooms;
-    },
-
-    // ============ HELPER FUNCTIONS ============
-// Building derivation from room code
-getBuildingFromRoomCode(kod_ruang) {
-    if (!kod_ruang) return null;
-
-    if (kod_ruang.startsWith('N28A')) return 'N28A';
-    if (kod_ruang.startsWith('N28')) return 'N28';
-
-    return null;
-},
-
-// Convert TTMS day number to English day name
-getDayNameFromHari(dayNumber) {
-    if (!dayNumber) return null;
-    
-    const dayNum = parseInt(dayNumber);
-    const dayMap = {
-        2: 'Monday',    // 2 = Isnin
-        3: 'Tuesday',   // 3 = Selasa
-        4: 'Wednesday', // 4 = Rabu
-        5: 'Thursday',  // 5 = Khamis
-        6: 'Friday'     // 6 = Jumaat
-        // Skip 1 = Ahad (Sunday), 7 = Sabtu (Saturday)
-    };
-    
-    return dayMap[dayNum] || null;
-},
 
 // Parse TTMS response
 parseTTMSResponse(text, entity) {
@@ -1472,7 +1367,7 @@ parseTTMSResponse(text, entity) {
 
     async fetchWeeklyDistributionForUser(user) {
     try {
-        console.log('📊 REAL Weekly Distribution by Workload Type (TTMS)');
+        console.log('REAL Weekly Distribution by Workload Type (TTMS)');
 
         const { sesi, semester } = this.getCurrentSession();
 
@@ -1487,7 +1382,7 @@ parseTTMSResponse(text, entity) {
 
         let subjects = [];
 
-        // 1️⃣ Get subjects by role (NO ADMIN LOGIC CHANGE)
+        //  Get subjects by role (NO ADMIN LOGIC CHANGE)
         if (user.role === 'student') {
             subjects = await this.fetchMyCourses(user.username);
         } else if (user.role === 'lecturer') {
@@ -1496,13 +1391,13 @@ parseTTMSResponse(text, entity) {
             return weekly;
         }
 
-        // 2️⃣ Filter current session
+        //  Filter current session
         const currentSubjects = subjects.filter(s =>
             s.sesi === sesi &&
             String(s.semester) === String(semester)
         );
 
-        // 3️⃣ Loop subjects → timetable
+        //  Loop subjects → timetable
         for (const subject of currentSubjects) {
             if (!subject.kod_subjek || !subject.seksyen) continue;
 
@@ -1519,7 +1414,7 @@ parseTTMSResponse(text, entity) {
                 const day = this.getDayNameFromHari(slot.hari);
                 if (!weekly[day]) return;
 
-                // ✅ SAME classification as AnalysisController
+                //  SAME classification as AnalysisController
                 const jenis = slot.jenis || subject.jenis || subject.jenis_kelas || '';
                 const j = jenis.toLowerCase();
 
@@ -1532,11 +1427,11 @@ parseTTMSResponse(text, entity) {
             });
         }
 
-        console.log('✅ Weekly workload distribution:', weekly);
+        console.log('Weekly workload distribution:', weekly);
         return weekly;
 
     } catch (error) {
-        console.error('❌ Weekly distribution error:', error);
+        console.error(' Weekly distribution error:', error);
 
         // SAFE fallback (never fake data)
         return {
@@ -1677,6 +1572,6 @@ parseTTMSResponse(text, entity) {
 if (typeof window !== 'undefined') {
     window.TTMS = TTMS;
     TTMS.init(); // Load session IDs from localStorage
-    console.log('✅ TTMS Model loaded and initialized');
+    console.log(' TTMS Model loaded and initialized');
 }
 

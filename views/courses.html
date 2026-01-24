@@ -20,20 +20,7 @@
     <div class="card mb-4">
         <div class="card-body">
             <div class="row g-3 align-items-center">
-                <div class="col-12 col-lg-4">
-                    <!-- Faculty -->
-                    <label class="form-label mb-1">Faculty/Department</label>
-                    <select class="form-select" v-model="filterFaculty" @change="applyFilters">
-                        <option value="all">All Faculties</option>
-                        <option value="FSKSM">Computing (FSKSM)</option>
-                        <option value="FAB">Business (FAB)</option>
-                        <option value="FKE">Electrical (FKE)</option>
-                        <option value="FKM">Mechanical (FKM)</option>
-                        <option value="FPPSM">Education (FPPSM)</option>
-                        <option value="FKKKSA">Chemical Engineering (FKKKSA)</option>
-                        <option value="PPIPS">Social Sciences (PPIPS)</option>
-                    </select>
-                </div>
+                
 
                 <!-- Search (full width input group) -->
                 <div class="col-12 col-lg-6">
@@ -55,12 +42,7 @@
                     </div>
                 </div>
 
-                <!-- Refresh -->
-                <div class="col-12 col-lg-2 d-grid">
-                    <button class="btn btn-utm" @click="loadAllCourses">
-                    <i class="fas fa-sync-alt me-2"></i>Refresh
-                    </button>
-                </div>
+            
             </div>
         </div>
     </div>
@@ -119,12 +101,6 @@
                 <i class="fas fa-book me-2"></i>
                 Course List
             </h5>
-            <div>
-                <span class="badge bg-light text-dark me-2">{{ filteredCourses.length }} courses</span>
-                <button v-if="$parent.user.role === 'admin'" class="btn btn-sm btn-light">
-                    <i class="fas fa-download me-1"></i> Export
-                </button>
-            </div>
         </div>
         <div class="card-body">
             <div v-if="isLoading" class="text-center py-5">
@@ -146,9 +122,7 @@
                             <th>Course Code</th>
                             <th>Course Name</th>
                             <th>Sections</th>
-                            <th>Lecturer</th>
                             <th>Students</th>
-                            <th>Room</th>
                             <th v-if="$parent.user.role !== 'student'">Actions</th>
                         </tr>
                     </thead>
@@ -159,23 +133,16 @@
                             <td>
                                 <strong class="text-primary">{{ course.kod_subjek || 'N/A' }}</strong>
                                 <span v-if="course.sesi === currentSession.sesi && course.semester.toString() === currentSession.semester" 
-                                      class="badge bg-success ms-2">Current</span>
+                                        class="badge bg-success ms-2">Current</span>
                             </td>
                             <td>{{ course.nama_subjek || 'N/A' }}</td>
                             <td>
                                 <span class="badge bg-info">{{ course.bil_seksyen || '1' }} section(s)</span>
                             </td>
                             <td>
-                                <small>{{ course.kod_pensyarah || 'N/A' }}</small>
-                                <br>
-                                <span class="text-muted small">{{ course.nama_pensyarah || '' }}</span>
-                            </td>
-                            <td>
                                 <span class="badge bg-success">{{ course.bil_pelajar || '0' }}</span>
                             </td>
-                            <td>
-                                <code>{{ course.kod_bilik || 'TBA' }}</code>
-                            </td>
+
                             <td v-if="$parent.user.role !== 'student'">
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn btn-outline-primary" @click="viewCourseDetails(course.kod_subjek)">
@@ -190,20 +157,6 @@
                     </tbody>
                 </table>
                 
-                <!-- Pagination -->
-                <nav v-if="filteredCourses.length > 50" class="mt-3">
-                    <ul class="pagination justify-content-center">
-                        <li class="page-item disabled">
-                            <a class="page-link" href="#">Previous</a>
-                        </li>
-                        <li class="page-item active"><a class="page-link" href="#">1</a></li>
-                        <li class="page-item"><a class="page-link" href="#">2</a></li>
-                        <li class="page-item"><a class="page-link" href="#">3</a></li>
-                        <li class="page-item">
-                            <a class="page-link" href="#">Next</a>
-                        </li>
-                    </ul>
-                </nav>
             </div>
         </div>
         <div class="card-footer bg-light">
