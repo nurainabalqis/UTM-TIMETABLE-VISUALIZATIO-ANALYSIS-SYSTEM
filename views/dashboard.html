@@ -117,36 +117,42 @@
         </div>
 
         
-        <!-- Daily Distribution Chart -->
-        <div class="col-md-6 mt-4">
-            <div class="chart-container">
-                <h5 class="mb-3">
-                    <i class="fas fa-calendar-day me-2"></i>
-                    Daily Distribution 
-                </h5>
-                <div style="height: 400px;">
-                    <canvas id="dailyDistributionChart"></canvas>
-                </div>
+        <!-- Daily Distribution Chart (STUDENTS ONLY) -->
+<div v-if="$parent.user.role === 'student'">
+
+    <div class="col-md-6 mt-4">
+        <div class="chart-container">
+            <h5 class="mb-3">
+                <i class="fas fa-calendar-day me-2"></i>
+                Daily Distribution
+            </h5>
+            <div style="height: 400px;">
+                <canvas id="dailyDistributionChart"></canvas>
             </div>
         </div>
     </div>
 
-    <!--<div class="mt-3 p-3 rounded bg-light border" id="dailyInsights">
-    <h6 class="fw-semibold mb-2 text-secondary">
-        <i class="fas fa-lightbulb me-2"></i>
-        Automated Insights (Derived from TTMS Data)
-    </h6>
+    <!-- Daily Insights -->
+    <div class="mt-3 p-3 rounded bg-light border" id="dailyInsights">
+        <h6 class="fw-semibold mb-2 text-secondary">
+            <i class="fas fa-lightbulb me-2"></i>
+            Automated Insights (Derived from TTMS Data)
+        </h6>
 
-    <ul class="mb-0 ps-3">
-        <li id="insight-busiest" class="mb-1"></li>
-        <li id="insight-lightest" class="mb-1"></li>
-        <li id="insight-dominant"></li>
-        <li id="insight-free" class="mb-1"></li>
-    </ul>
-    <small class="text-muted d-block mt-2" id="insight-note">
-        *1 session represents 1 scheduled TTMS timetable slot (masa).
-    </small>
+        <ul class="mb-0 ps-3">
+            <li id="insight-busiest" class="mb-1"></li>
+            <li id="insight-lightest" class="mb-1"></li>
+            <li id="insight-dominant"></li>
+            <li id="insight-free" class="mb-1"></li>
+        </ul>
+
+        <small class="text-muted d-block mt-2" id="insight-note">
+            *1 session represents 1 scheduled TTMS timetable slot (masa).
+        </small>
+    </div>
+
 </div>
+
 
     <!-- Peak Hours Chart -->
     <div class="row mb-4">

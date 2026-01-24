@@ -32,20 +32,24 @@ class AnalysisController {
             // Wait for DOM to be ready
             await new Promise(resolve => setTimeout(resolve, 300));
             
+            const user = JSON.parse(localStorage.getItem('user'));
+
             // Load charts
             await Promise.all([
                 this.loadWorkloadChart(),
                 this.loadPeakHoursChart()
             ]);
 
-            
+            if (user?.role === 'student') {
+            await this.drawDailyDistributionChart();
+            }
 
             if (typeof Chart === 'undefined') {
                 console.error('❌ Chart.js is not loaded!');
                 return;
             }
 
-            await this.drawDailyDistributionChart();
+         
 
             console.log('AnalysisController: All charts loaded successfully');
         } catch (error) {
@@ -55,8 +59,7 @@ class AnalysisController {
         }
     }
     
-    // Load workload chart
-    // controllers/analysisController.js
+
     // Load workload chart
     async loadWorkloadChart() {
     const showLoader = () => {
@@ -378,15 +381,20 @@ class AnalysisController {
             // ===============================
             // AUTOMATED INSIGHTS (updated to use totalsByDay)
             // ===============================
-            const busiestIndex = totalsByDay.indexOf(Math.max(...totalsByDay));
+            const maxTotal = Math.max(...totalsByDay);
 
             const nonZeroTotals = totalsByDay
             .map((v, i) => ({ v, i }))
             .filter((o) => o.v > 0);
 
-            const lightestIndex = nonZeroTotals.length
-            ? nonZeroTotals.reduce((a, b) => (b.v < a.v ? b : a)).i
-            : -1;
+            
+            const minTotal = nonZeroTotals.length
+                ? Math.min(...nonZeroTotals.map(o => o.v))
+                : 0;
+
+            // ✅ Multiple busiest / lightest days
+            const busiestDays = labels.filter((_, i) => totalsByDay[i] === maxTotal);
+            const lightestDays = labels.filter((_, i) => totalsByDay[i] === minTotal);
 
             const freeEl = document.getElementById("insight-free");
             const freeDays = labels
@@ -409,8 +417,8 @@ class AnalysisController {
             };
 
             const dominantType = Object.entries(totalsByType).reduce(
-            (a, b) => (b[1] > a[1] ? b : a),
-            ["—", 0]
+                (a, b) => (b[1] > a[1] ? b : a),
+                ["—", 0]
             )[0];
 
             const busiestEl = document.getElementById("insight-busiest");
@@ -418,17 +426,16 @@ class AnalysisController {
             const dominantEl = document.getElementById("insight-dominant");
 
             if (busiestEl) {
-            busiestEl.innerHTML = `<i class="fas fa-circle text-danger me-2"></i>
-                Busiest Day: ${labels[busiestIndex]} (highest total sessions)`;
+                busiestEl.innerHTML = `<i class="fas fa-circle text-danger me-2"></i>
+                    Busiest Day: ${busiestDays.join(" and ")} (highest total sessions)`;
             }
 
             if (lightestEl) {
-            lightestEl.innerHTML =
-                lightestIndex >= 0
-                ? `<i class="fas fa-circle text-success me-2"></i>
-                    Lightest Day: ${labels[lightestIndex]} (lowest total sessions)`
-                : `<i class="fas fa-circle text-success me-2"></i>
-                    Lightest Day: —`;
+                lightestEl.innerHTML = lightestDays.length
+                    ? `<i class="fas fa-circle text-success me-2"></i>
+                        Lightest Day: ${lightestDays.join(" and ")} (lowest total sessions)`
+                    : `<i class="fas fa-circle text-success me-2"></i>
+                        Lightest Day: —`;
             }
 
             if (dominantEl) {
