@@ -12,7 +12,6 @@ const SUBJECTS = [
     { code: "SCST1143", sections: [1,2,3,4,5] },
     { code: "SCST1123", sections: [3] },
     { code: "UECS6013", sections: [1] },
-    { code: "SECD2523", sections: [2,3,4] },
     { code: "SECI1013", sections: [8,9,10]},
     { code: "MCSD6227", sections: [1]},  // Removed extra space
     { code: "SECJ2013", sections: [9]},   // Removed extra space
@@ -26,7 +25,7 @@ let dayCount = {1:0,2:0,3:0,4:0,5:0}; // ISNIN=1 … JUMAAT=5
 // UTILITY
 // -----------------------
 function hariText(h) {
-    return ["","1","2","3","4","5"][h] || h;
+    return ["","Monday","Tuesday","Wednesday","Thursday","Friday"][h] || h;
 }
 function masaText(m) {
     // If m is a number (slot index), map to real time
@@ -334,13 +333,7 @@ function initializeClashDetection() {
         console.error(" Google Charts not available");
         return;
     }
-    
-    // Add a button click handler if button exists
-    const loadButton = document.querySelector('button[onclick*="loadAllSubjects"]');
-    if (loadButton) {
-        loadButton.onclick = loadAllSubjects;
-    }
-    
+      
     // Auto-load after a delay
     setTimeout(() => {
         if (allRecords.length === 0) {
