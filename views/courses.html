@@ -20,20 +20,6 @@
     <div class="card mb-4">
         <div class="card-body">
             <div class="row g-3 align-items-center">
-                <div class="col-12 col-lg-4">
-                    <!-- Faculty -->
-                    <label class="form-label mb-1">Faculty/Department</label>
-                    <select class="form-select" v-model="filterFaculty" @change="applyFilters">
-                        <option value="all">All Faculties</option>
-                        <option value="FSKSM">Computing (FSKSM)</option>
-                        <option value="FAB">Business (FAB)</option>
-                        <option value="FKE">Electrical (FKE)</option>
-                        <option value="FKM">Mechanical (FKM)</option>
-                        <option value="FPPSM">Education (FPPSM)</option>
-                        <option value="FKKKSA">Chemical Engineering (FKKKSA)</option>
-                        <option value="PPIPS">Social Sciences (PPIPS)</option>
-                    </select>
-                </div>
 
                 <!-- Search (full width input group) -->
                 <div class="col-12 col-lg-6">
@@ -55,12 +41,6 @@
                     </div>
                 </div>
 
-                <!-- Refresh -->
-                <div class="col-12 col-lg-2 d-grid">
-                    <button class="btn btn-utm" @click="loadAllCourses">
-                    <i class="fas fa-sync-alt me-2"></i>Refresh
-                    </button>
-                </div>
             </div>
         </div>
     </div>
