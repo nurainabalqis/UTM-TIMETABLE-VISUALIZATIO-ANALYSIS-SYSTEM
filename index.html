@@ -1847,23 +1847,48 @@ mapDay(dayNumber) {
                             template,
                             data() {
                                 return {
+                                    // existing
                                     stats: {
-                                        totalRooms: 0,
-                                        avgUtilization: 0,
-                                        peakHours: 0,
-                                        lowUsage: 0
+                                    totalRooms: 0,
+                                    avgUtilization: 0,
+                                    peakHours: 0,
+                                    lowUsage: 0
                                     },
                                     topRooms: [],
                                     chartFilter: 'capacity',
-                                    isLoading: true
+                                    isLoading: true,
+
+                                    // ===== LECTURER TOOL STATE =====
+                                    isLecturer: JSON.parse(localStorage.getItem('user'))?.role === 'lecturer',
+
+                                    lecturerTeachingSlots: [],
+                                    lecturerSlotsLoading: false,
+                                    selectedTeachingSlotKey: '',
+
+                                    matchRoomType: true,
+
+                                    altRooms: [],
+                                    altRoomsLoading: false,
+                                    altRoomsSearched: false,
+                                    altRoomsError: null,
+                                    altRoomsBuilding: 'both', // 'both' | 'N28' | 'N28A'
+
+                                    altModalView: 'list', // 'list' | 'schedule'
+                                    selectedAltRoom: null,
+                                    selectedAltRoomSchedule: [],
+                                    scheduleLoading: false,
                                 };
                             },
                             async mounted() {
                                 await this.loadRoomAnalysis();
-                                
+
+                                if (this.isLecturer) {
+                                    await this.loadLecturerTeachingSlots();
+                                }
+
                                 this.$nextTick(() => {
                                     if (window.RoomController) {
-                                        RoomController.drawRoomUtilizationDashboard();
+                                    RoomController.drawRoomUtilizationDashboard();
                                     }
                                 });
                             },
@@ -1934,6 +1959,12 @@ mapDay(dayNumber) {
                                         this.$parent.showAlert('Room details feature not available', 'info');
                                     }
                                 },
+                                getAltBuildingLabel() {
+                                    const b = String(this.altRoomsBuilding || 'both').toUpperCase();
+                                    if (b === 'N28') return 'N28';
+                                    if (b === 'N28A') return 'N28A';
+                                    return 'N28/N28A';
+                                },
                                 exportChartData() {
                                     // Export functionality
                                     const csvContent = "data:text/csv;charset=utf-8," 
@@ -1950,6 +1981,143 @@ mapDay(dayNumber) {
                                     document.body.removeChild(link);
                                     
                                     this.$parent.showAlert('Room analysis data exported', 'success');
+                                },
+                                async loadLecturerTeachingSlots() {
+                                    if (!this.isLecturer) return;
+
+                                    this.lecturerSlotsLoading = true;
+                                    try {
+                                        const user = JSON.parse(localStorage.getItem("user")) || {};
+
+                                        const stripEmail = (v) => {
+                                        const s = String(v || "").trim();
+                                        return s.includes("@") ? s.split("@")[0] : s;
+                                        };
+
+                                        const candidates = [
+                                        user.no_pekerja,
+                                        user.kod_pensyarah,
+                                        user.login_name,
+                                        user.username,
+                                        user.user_id
+                                        ]
+                                        .map(stripEmail)
+                                        .filter(Boolean);
+
+                                        let slots = [];
+
+                                        // 1) Try jadual_pensyarah using likely IDs
+                                        for (const id of candidates) {
+                                        slots = await TTMS.fetchLecturerTimetableSlots(id);
+                                        if (Array.isArray(slots) && slots.length > 0) break;
+                                        }
+
+                                        // 2) Fallback: name-based timetable (works without staff ID)
+                                    if (!Array.isArray(slots) || slots.length === 0) {
+                                    const lecturerName = (user.name || user.nama || user.full_name || "").trim();
+
+                                    // fetchLecturerTimetable returns jadual_subjek-like entries (hari/masa/ruang)
+                                    const entries = await TTMS.fetchLecturerTimetable(candidates[0] || "", lecturerName);
+
+                                    const toRoomCode = (ruang) => {
+                                        if (!ruang) return "";
+                                        if (typeof ruang === "string") return ruang;
+                                        if (typeof ruang === "object") {
+                                        return (
+                                            ruang.kod_ruang ||
+                                            ruang.nama_ruang_singkat ||
+                                            ruang.nama_ruang ||
+                                            ""
+                                        );
+                                        }
+                                        return String(ruang || "");
+                                    };
+
+                                    slots = (entries || []).map(e => ({
+                                        hari: e.hari,
+                                        masa: e.masa,
+                                        kod_ruang: toRoomCode(e.ruang) || e.kod_ruang || e.kod_bilik || "",
+                                        jenis: e.jenis || e.jenis_ruang || ""
+                                    }));
+                                    }
+
+                                    // Normalize for dropdown
+                                    this.lecturerTeachingSlots = (slots || []).map(s => {
+                                    const key = `${s.hari}|${s.masa}|${s.jenis || ""}`;
+                                    const dayLabel = TTMS.getDayNameFromHari ? TTMS.getDayNameFromHari(s.hari) : `Day ${s.hari}`;
+
+                                    // extra safety: if kod_ruang is still an object for any reason
+                                    const roomLabel =
+                                        typeof s.kod_ruang === "object"
+                                        ? (s.kod_ruang?.kod_ruang || s.kod_ruang?.nama_ruang_singkat || s.kod_ruang?.nama_ruang || "TBA")
+                                        : (s.kod_ruang || "TBA");
+
+                                    return {
+                                        _key: key,
+                                        _raw: s,
+                                        _label: `${dayLabel}, Slot ${s.masa} (${roomLabel})`
+                                    };
+                                    });
+
+
+                                    } catch (e) {
+                                        console.error("Failed to load lecturer slots", e);
+                                        this.lecturerTeachingSlots = [];
+                                    } finally {
+                                        this.lecturerSlotsLoading = false;
+                                    }
+                                },
+
+                                async findAlternativeRooms() {
+                                    this.altRoomsLoading = true;
+                                    this.altRoomsSearched = false;
+                                    this.altRoomsError = null;
+                                    this.altRooms = [];
+
+                                    try {
+                                        const slot = this.lecturerTeachingSlots.find(
+                                        s => s._key === this.selectedTeachingSlotKey
+                                        );
+
+                                        if (!slot) throw new Error('Invalid teaching slot');
+
+                                        const { hari, masa, jenis } = slot._raw;
+
+                                        const rooms = await TTMS.fetchAvailableStudySpaces({
+                                        day: hari,
+                                        timeBlock: masa,
+                                        roomType: this.matchRoomType ? jenis : null,
+                                        building: this.altRoomsBuilding
+                                        });
+
+                                        // ✅ REAL filter: keep only rooms with no class at (hari, masa)
+                                        this.altRooms = await RoomController.filterRoomsFreeAtSlot(rooms || [], hari, masa);
+
+                                        this.altRoomsSearched = true;
+
+
+                                    } catch (e) {
+                                        console.error(e);
+                                        this.altRoomsError = 'Failed to find available rooms.';
+                                    } finally {
+                                        this.altRoomsLoading = false;
+                                    }
+                                },
+
+                                getBuildingFromRoomCode(code) {
+                                    if (!code) return null;
+                                    const c = String(code).toUpperCase();
+                                    if (c.startsWith('N28A')) return 'N28A';
+                                    if (c.startsWith('N28')) return 'N28';
+                                    return null;
+                                },
+
+                                openAltRoomsModal() {
+                                    // Uses the same nice modal you already have
+                                    RoomController.showRoomListModal(
+                                        `Available Rooms (N28/N28A) — ${this.altRooms.length}`,
+                                        this.altRooms
+                                    );
                                 }
                             }
                         };
