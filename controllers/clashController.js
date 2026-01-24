@@ -1,12 +1,12 @@
 // -----------------------
 // CONFIGURATION
 // -----------------------
+
 const SESSION = "2025/2026";
 const SEMESTER = 1;
 
 // Real subjects + sections (TTMS data)
 const SUBJECTS = [
-    { code: "SCSM2113", sections: [1,2,3] },
     { code: "SECR3104", sections: [3] },
     { code: "SECV3104", sections: [1] },
     { code: "SCST1143", sections: [1,2,3,4,5] },
@@ -26,22 +26,37 @@ let dayCount = {1:0,2:0,3:0,4:0,5:0}; // ISNIN=1 … JUMAAT=5
 // UTILITY
 // -----------------------
 function hariText(h) {
-    return ["","ISNIN","SELASA","RABU","KHAMIS","JUMAAT"][h] || h;
+    return ["","1","2","3","4","5"][h] || h;
 }
 function masaText(m) {
-    return {4:"08:00-08:50",5:"09:00-09:50",6:"10:00-10:50"}[m] || m;
+    // If m is a number (slot index), map to real time
+    const slotMap = {
+        1: "08:00-08:50",
+        2: "09:00-09:50",
+        3: "10:00-10:50",
+        4: "11:00-11:50",
+        5: "12:00-12:50",
+        6: "14:00-14:50",
+        7: "15:00-15:50",
+        8: "16:00-16:50"
+    };
+
+    if (typeof m === "number") {
+        return slotMap[m] || `Slot ${m}`;
+    } 
+    // If m is already a string (like "09:00-09:50") just return it
+    return m;
 }
+
+
 function buildingFromRoom(room) {
     return room && room.startsWith("N28A") ? "N28A" : "N28";
 }
-
-// -----------------------
-// FETCH TTMS DATA (DIRECT - NO PROXY)
-// -----------------------
 async function fetchSchedule(code, section) {
     const url = `http://web.fc.utm.my/ttms/web_man_webservice_json.cgi?entity=jadual_subjek&sesi=${SESSION}&semester=${SEMESTER}&kod_subjek=${code}&seksyen=${section}`;
     
-    console.log(`📡 Fetching: ${code} Section ${section}`);
+    console.log(` Fetching: ${code} Section ${section}`);
+
     
     try {
         const res = await fetch(url);
@@ -73,14 +88,14 @@ async function loadAllSubjects() {
     
     const tbody = document.querySelector("#clashTable tbody");
     if (tbody) {
-        tbody.innerHTML = "<tr><td colspan='8' class='text-center'>🔄 Loading data from TTMS...</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='8' class='text-center'> Loading data from TTMS...</td></tr>";
     }
 
     let successCount = 0;
     let failCount = 0;
     let totalRecords = 0;
 
-    console.log("🚀 Starting to load TTMS data...");
+    console.log(" Starting to load TTMS data...");
     console.log(`Session: ${SESSION}, Semester: ${SEMESTER}`);
 
     for(const subj of SUBJECTS){
@@ -104,11 +119,11 @@ async function loadAllSubjects() {
                     });
                     successCount++;
                 } else {
-                    console.warn(`⚠️ No data: ${subj.code} Sec ${sec}`);
+                    console.warn(` No data: ${subj.code} Sec ${sec}`);
                     failCount++;
                 }
             } catch (error) {
-                console.error(`❌ Error: ${subj.code} Sec ${sec}:`, error);
+                console.error(` Error: ${subj.code} Sec ${sec}:`, error);
                 failCount++;
             }
             
@@ -122,7 +137,7 @@ async function loadAllSubjects() {
     console.log(`    Total Records: ${totalRecords}`);
 
     if (totalRecords === 0) {
-        alert("⚠️ No data loaded!\n\nCheck console (F12) for errors.");
+        alert(" No data loaded!\n\nCheck console (F12) for errors.");
         totalClashesEl.innerText = "0";
         if (tbody) {
             tbody.innerHTML = "<tr><td colspan='8' class='text-center text-danger'>No data loaded. Check console.</td></tr>";
@@ -271,14 +286,14 @@ function renderCharts(){
         if (dayChartContainer) {
             const dayData = google.visualization.arrayToDataTable([
                 ['Day','Clashes'],
-                ['ISNIN', dayCount[1]],
-                ['SELASA', dayCount[2]],
-                ['RABU', dayCount[3]],
-                ['KHAMIS', dayCount[4]],
-                ['JUMAAT', dayCount[5]]
+                ['Monday', dayCount[1]],
+                ['Tuesday', dayCount[2]],
+                ['Wednesday', dayCount[3]],
+                ['Thursday', dayCount[4]],
+                ['Friday', dayCount[5]]
             ]);
             const dayOptions = {
-                title: 'Clash Count per Day', 
+                title: 'Number of Clashes by Day', 
                 legend: {position: 'none'}, 
                 colors: ['#0d6efd'], 
                 height: 300,
@@ -289,7 +304,7 @@ function renderCharts(){
             dayChart.draw(dayData, dayOptions);
         }
         
-        console.log("✅ Charts rendered successfully");
+        console.log("Charts rendered successfully");
     }
 }
 
@@ -299,7 +314,7 @@ function renderCharts(){
 
 // Single initialization function to avoid conflicts
 function initializeClashDetection() {
-    console.log("📊 TTMS Clash Detection Initializing...");
+    console.log(" TTMS Clash Detection Initializing...");
     
     // Check if we're on the clash page
     const isClashPage = document.getElementById('totalClashes') || 
@@ -307,16 +322,16 @@ function initializeClashDetection() {
                         document.getElementById('clashTable');
     
     if (!isClashPage) {
-        console.log("Not on clash page, skipping initialization");
+        console.log(" Not on clash page, skipping initialization");
         return;
     }
     
     // Load Google Charts
     if (typeof google !== 'undefined') {
         google.charts.load('current', { packages: ['corechart'] });
-        console.log("Google Charts loaded");
+        console.log(" Google Charts loaded");
     } else {
-        console.error("Google Charts not available");
+        console.error(" Google Charts not available");
         return;
     }
     
@@ -348,4 +363,4 @@ window.detectClashes = detectClashes;
 window.renderCharts = renderCharts;
 window.initializeClashDetection = initializeClashDetection;
 
-console.log("✅ TTMS Clash Detection loaded");
+console.log(" TTMS Clash Detection loaded");

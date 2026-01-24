@@ -379,6 +379,8 @@ async fetchSubjectSections(sesi, semester) {
     }
 },
 
+
+
 async fetchSubjects(sesi, semester) {
     try {
         // entity=subjek tak perlukan session_id
@@ -388,6 +390,7 @@ async fetchSubjects(sesi, semester) {
         return [];
     }
 },
+
 
 
 async fetchLecturerTimetable(lecturerId, lecturerName = "") {
@@ -930,7 +933,7 @@ async fetchLecturerTimetable(lecturerId, lecturerName = "") {
 // ================= PEAK TEACHING HOURS (LECTURER) =================
     async fetchPeakTeachingHoursForLecturer(user) {
     try {
-        console.log('📊 Peak Teaching Hours (REAL TTMS ONLY)');
+        console.log(' Peak Teaching Hours (REAL TTMS ONLY)');
         const { sesi, semester } = this.getCurrentSession();
 
         const lecturerId = user.username;
